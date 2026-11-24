@@ -1,0 +1,25 @@
+services:
+  experiment-guide:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    image: experiment-guide
+    restart: always
+    # env_file:
+    #   - ./secrets/.env
+    ports:
+      - 8756:8756 
+    volumes:
+      - .:/experiment-guide:delegated
+    networks:
+      - experiment-guide-network
+    command: sleep infinity
+
+# volumes:
+#   data:
+#     driver: local
+
+networks:
+  experiment-guide-network:
+    driver: bridge
