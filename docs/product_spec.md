@@ -131,7 +131,8 @@ The MVP provides:
 - Project configuration and run entry/import screens.
 - A single table containing runs and generated recommendations. Parameter and
   objective cells are editable, and adding a run creates a blank row in the
-  table. The generation and run-management sections appear below the table.
+  table. The Runs and recommendations heading appears above the table; the
+  Generate batch and Add run buttons appear below it.
 - A simple chart of each objective over run order.
 - A project JSON download action and clear feedback for invalid input or errors.
 - Parameter-response plots, Pareto plots, and convergence indicators are deferred.

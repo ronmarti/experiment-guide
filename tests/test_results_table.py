@@ -49,7 +49,7 @@ class ResultsTableTests(unittest.TestCase):
         prediction_patch.start()
         self.addCleanup(prediction_patch.stop)
 
-    def test_table_precedes_generation_and_run_sections(self):
+    def test_heading_precedes_table_and_actions_follow_it(self):
         project = self.state["project"].value
         project["runs"] = []
         project["recommendation_batches"] = []
@@ -64,9 +64,14 @@ class ResultsTableTests(unittest.TestCase):
                 )
                 generation = next(i for i, w in enumerate(all_widgets) if 'id="generate-recommendations"' in getattr(w, "template", ""))
                 generate_button = next(i for i, w in enumerate(all_widgets) if isinstance(w, v.Btn) and "Generate batch" in w.children)
-                runs = next(i for i, w in enumerate(all_widgets) if 'id="runs-and-recommendations"' in getattr(w, "template", ""))
+                headings = [
+                    i for i, w in enumerate(all_widgets)
+                    if isinstance(getattr(w, "template", None), str)
+                    and 'id="runs-and-recommendations"' in w.template
+                ]
+                self.assertEqual(len(headings), 1)
                 add_button = next(i for i, w in enumerate(all_widgets) if isinstance(w, v.Btn) and "Add run" in w.children)
-                return content, generation, generate_button, runs, add_button
+                return headings[0], content, generation, generate_button, add_button
 
             order = ordered_widgets()
             self.assertEqual(order, tuple(sorted(order)))

@@ -73,6 +73,7 @@ def RunsView(state, services):
         if values:
             best_results[name] = (max if objective["direction"] == "maximize" else min)(values)
     rows = ordered_table_rows(project)
+    solara.Markdown("## Runs and recommendations")
     if rows:
         with v.Html(tag="div", style_="overflow-x: auto"):
             with v.Html(tag="table", style_="width: 100%; border-collapse: collapse"):
@@ -119,7 +120,6 @@ def RunsView(state, services):
     if waiting.value:
         solara.ProgressLinear()
 
-    solara.Markdown("## Runs and recommendations")
     solara.Markdown(
         "Edit parameter values and results in the table, then select Save for each row. "
         "Available objective results are used without filling in missing results. Save edits before leaving this screen. "
