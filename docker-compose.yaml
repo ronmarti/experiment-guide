@@ -8,14 +8,10 @@ services:
     restart: unless-stopped
     ports:
       - 8765:8765
-    volumes:
-      - data:/data
+    environment:
+      APP_ACCESS_KEY: ${APP_ACCESS_KEY:-123}
     networks:
       - experiment-guide-network
-
-volumes:
-  data:
-    driver: local
 
 networks:
   experiment-guide-network:
