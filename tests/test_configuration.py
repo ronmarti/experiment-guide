@@ -1,22 +1,22 @@
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import ipyvuetify as v
 import solara
 from solara.util import IPYVUETIFY_V3
 
 from experiment.model.project import blank_project, upgrade_project
-from experiment.services.optimization import generate_candidates
-from experiment.services.persistence import load_project_json, parse_csv
-from experiment.services.runs import save_result
+from experiment.services.optimization import AxOptimizer
 from gui.configuration import ParameterConfiguration
 from gui.runs_view import RunsView
+from gui.services import AppServices
 from test_results_table import widgets
 
 
 class ConfigurationTests(unittest.TestCase):
     def setUp(self):
+        self.services = AppServices()
         project = blank_project("Test")
         project["parameters"] = [{"name": "x", "type": "continuous", "bounds": [0, 10]}]
         project["objective"] = {"name": "score", "direction": "maximize"}
@@ -29,12 +29,12 @@ class ConfigurationTests(unittest.TestCase):
             "message": solara.reactive(""),
             "message_kind": solara.reactive("info"),
         }
-        prediction_patch = patch("gui.result_row.predict_candidate", return_value=None)
+        prediction_patch = patch.object(self.services.optimizer, "predict", return_value=None)
         prediction_patch.start()
         self.addCleanup(prediction_patch.stop)
 
     def test_tables_add_edit_delete_and_preserve_measurements(self):
-        root, context = solara.render(ParameterConfiguration(self.state), handle_error=False)
+        root, context = solara.render(ParameterConfiguration(self.state, self.services.configuration), handle_error=False)
         try:
             def click(label):
                 next(b for b in context.find(v.Btn).widgets if label in b.children).fire_event("click", {})
@@ -67,7 +67,7 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(len(self.state["project"].value["parameters"]), 2)
             self.assertEqual(self.state["project"].value["runs"][0]["parameters"], {"temperature": 2})
             with self.assertRaisesRegex(ValueError, "Run 1.*count"):
-                generate_candidates(self.state["project"].value, 1)
+                self.services.optimizer.generate(self.state["project"].value, 1)
 
             click("Add objective")
             field("name for new objective").v_model = "cost"
@@ -80,7 +80,7 @@ class ConfigurationTests(unittest.TestCase):
                 {"name": "cost", "direction": "minimize"},
             ])
             self.assertEqual(project["runs"][0]["results"], {"score": 3})
-            self.assertEqual(load_project_json(json.dumps(project).encode()), project)
+            self.assertEqual(self.services.files.load_json(json.dumps(project).encode()), project)
 
             click("Add constraint")
             field("expression for new constraint").v_model = "temperature + count <= 12"
@@ -99,7 +99,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_parameter_rows_keep_controls_aligned_for_each_type(self):
         project = self.state["project"].value
         project["parameters"].append({"name": "color", "type": "categorical", "choices": ["red", "blue"]})
-        root, context = solara.render(ParameterConfiguration(self.state), handle_error=False)
+        root, context = solara.render(ParameterConfiguration(self.state, self.services.configuration), handle_error=False)
         try:
             next(b for b in context.find(v.Btn).widgets if "Add parameter" in b.children).fire_event("click", {})
             table = next(w for w in widgets(root) if getattr(w, "tag", None) == "table")
@@ -130,22 +130,21 @@ class ConfigurationTests(unittest.TestCase):
         upgrade_project(project)
         project["objectives"].append({"name": "cost", "direction": "minimize"})
         project["runs"].append({"id": 2, "parameters": {"x": 4}, "results": {"cost": 8}})
-        with patch("experiment.services.optimization.Client") as client_type:
-            client = client_type.return_value
-            client.get_next_trials.return_value = {2: {"x": 6}}
-            client.predict.return_value = [{"score": (2, 0.5), "cost": (8, 1.2)}]
-            candidates = generate_candidates(project, 1)
-            self.assertEqual(candidates[0]["predictions"], {
-                "score": {"mean": 2, "sigma": 0.5}, "cost": {"mean": 8, "sigma": 1.2},
-            })
-            client.configure_optimization.assert_called_once_with(objective="score, -cost")
-            client.configure_generation_strategy.assert_called_once_with(
-                initialize_with_center=False, allow_exceeding_initialization_budget=True,
-            )
-            self.assertEqual(
-                [call.kwargs["raw_data"] for call in client.complete_trial.call_args_list],
-                [{"score": 3.0}, {"cost": 8}],
-            )
+        client = Mock()
+        client.get_next_trials.return_value = {2: {"x": 6}}
+        client.predict.return_value = [{"score": (2, 0.5), "cost": (8, 1.2)}]
+        candidates = AxOptimizer(client_factory=lambda: client).generate(project, 1)
+        self.assertEqual(candidates[0]["predictions"], {
+            "score": {"mean": 2, "sigma": 0.5}, "cost": {"mean": 8, "sigma": 1.2},
+        })
+        client.configure_optimization.assert_called_once_with(objective="score, -cost")
+        client.configure_generation_strategy.assert_called_once_with(
+            initialize_with_center=False, allow_exceeding_initialization_budget=True,
+        )
+        self.assertEqual(
+            [call.kwargs["raw_data"] for call in client.complete_trial.call_args_list],
+            [{"score": 3.0}, {"cost": 8}],
+        )
 
     def test_generation_with_unobserved_new_objective_after_initial_budget(self):
         project = self.state["project"].value
@@ -155,13 +154,13 @@ class ConfigurationTests(unittest.TestCase):
         ]
         upgrade_project(project)
         project["objectives"].append({"name": "cost", "direction": "minimize"})
-        self.assertEqual(len(generate_candidates(project, 1)), 1)
+        self.assertEqual(len(self.services.optimizer.generate(project, 1)), 1)
 
     def test_multi_objective_rows_and_partial_results(self):
         project = self.state["project"].value
         upgrade_project(project)
         project["objectives"].append({"name": "cost", "direction": "minimize"})
-        root, context = solara.render(RunsView(self.state), handle_error=False)
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
         try:
             labels = [field.label for field in context.find(v.TextField).widgets]
             self.assertIn("score result for Batch 1, recommendation 1", labels)
@@ -179,17 +178,17 @@ class ConfigurationTests(unittest.TestCase):
         upgrade_project(project)
         project["objectives"].append({"name": "cost", "direction": "minimize"})
         project["recommendation_batches"][0]["candidates"].append({"parameters": {"x": 4}})
-        save_result(
+        self.services.runs.save(
             project, {"score": "", "cost": "6"}, batch_index=0, candidate_index=1,
             parameters={"x": "4"},
         )
         self.assertEqual(project["runs"][-1]["results"], {"cost": 6})
-        self.assertEqual(load_project_json(json.dumps(project).encode()), project)
+        self.assertEqual(self.services.files.load_json(json.dumps(project).encode()), project)
 
     def test_rename_parameter_updates_constraints_and_existing_measurements(self):
         self.state["project"].value["parameter_constraints"] = ["x <= 8"]
         self.state["project"].value["recommendation_batches"][0]["candidates"][0]["predictions"] = {"score": {"mean": 3, "sigma": 0.4}}
-        root, context = solara.render(ParameterConfiguration(self.state), handle_error=False)
+        root, context = solara.render(ParameterConfiguration(self.state, self.services.configuration), handle_error=False)
         try:
             name = next(w for w in context.find(v.TextField).widgets if w.label == "name for parameter 1")
             name.v_model = "temperature"
@@ -205,19 +204,19 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_partial_saved_row_and_legacy_load(self):
         legacy = self.state["project"].value
-        self.assertEqual(load_project_json(json.dumps(legacy).encode()), legacy)
+        self.assertEqual(self.services.files.load_json(json.dumps(legacy).encode()), legacy)
         upgrade_project(legacy)
         legacy["objectives"].append({"name": "cost", "direction": "minimize"})
-        save_result(legacy, {"score": "5", "cost": ""}, run_id=1, parameters={"x": "3"})
+        self.services.runs.save(legacy, {"score": "5", "cost": ""}, run_id=1, parameters={"x": "3"})
         self.assertEqual(legacy["runs"][0]["results"], {"score": 5})
-        self.assertEqual(load_project_json(json.dumps(legacy).encode()), legacy)
+        self.assertEqual(self.services.files.load_json(json.dumps(legacy).encode()), legacy)
 
     def test_multi_objective_parameter_edit_invalidates_predictions(self):
         project = self.state["project"].value
         upgrade_project(project)
         candidate = project["recommendation_batches"][0]["candidates"][0]
         candidate["predictions"] = {"score": {"mean": 3, "sigma": 0.4}}
-        save_result(project, {"score": "4"}, batch_index=0, candidate_index=0, parameters={"x": "3"})
+        self.services.runs.save(project, {"score": "4"}, batch_index=0, candidate_index=0, parameters={"x": "3"})
         self.assertNotIn("predictions", candidate)
         self.assertEqual(candidate["prediction_status"], "parameters_changed")
         self.assertEqual(project["runs"][0]["parameters"], {"x": 3})
@@ -227,16 +226,16 @@ class ConfigurationTests(unittest.TestCase):
         upgrade_project(project)
         project["objectives"].append({"name": "cost", "direction": "minimize"})
         self.assertEqual(
-            parse_csv(project, b"x,score,cost\n1,4,\n2,,5\n"),
+            self.services.files.parse_csv(project, b"x,score,cost\n1,4,\n2,,5\n"),
             [{"x": 1.0, "score": 4.0}, {"x": 2.0, "cost": 5.0}],
         )
         with self.assertRaisesRegex(ValueError, "CSV row 2"):
-            parse_csv(project, b"x,score,cost\n1,,\n")
+            self.services.files.parse_csv(project, b"x,score,cost\n1,,\n")
 
     def test_rename_objective_and_delete_parameter_retain_values(self):
         candidate = self.state["project"].value["recommendation_batches"][0]["candidates"][0]
         candidate["predictions"] = {"score": {"mean": 3, "sigma": 0.4}}
-        root, context = solara.render(ParameterConfiguration(self.state), handle_error=False)
+        root, context = solara.render(ParameterConfiguration(self.state, self.services.configuration), handle_error=False)
         try:
             name = next(w for w in context.find(v.TextField).widgets if w.label == "name for objective 1")
             name.v_model = "quality"
@@ -255,7 +254,7 @@ class ConfigurationTests(unittest.TestCase):
             candidate = project["recommendation_batches"][0]["candidates"][0]
             self.assertNotIn("predictions", candidate)
             self.assertEqual(candidate["prediction_status"], "configuration_changed")
-            self.assertEqual(load_project_json(json.dumps(project).encode()), project)
+            self.assertEqual(self.services.files.load_json(json.dumps(project).encode()), project)
         finally:
             context.close()
 
@@ -264,11 +263,11 @@ class ConfigurationTests(unittest.TestCase):
         upgrade_project(project)
         project["runs"][0]["results"]["score"] = float("nan")
         with self.assertRaisesRegex(ValueError, "finite numeric"):
-            load_project_json(json.dumps(project).encode())
+            self.services.files.load_json(json.dumps(project).encode())
         project["runs"][0]["results"]["score"] = 3
         project["runs"][0]["parameters"]["x"] = {"not": "a value"}
         with self.assertRaisesRegex(ValueError, "parameter values"):
-            load_project_json(json.dumps(project).encode())
+            self.services.files.load_json(json.dumps(project).encode())
 
 
 if __name__ == "__main__":

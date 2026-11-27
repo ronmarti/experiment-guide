@@ -3,6 +3,7 @@ import solara
 
 def session_state():
     session_id = solara.get_session_id()
+    # Reuse state within a session without sharing an active project across sessions.
     state = getattr(session_state, "_sessions", None)
     if state is None:
         state = {}

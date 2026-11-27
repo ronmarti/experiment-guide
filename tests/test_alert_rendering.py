@@ -8,10 +8,12 @@ from gui.alert_message import AlertMessage
 from gui.project_selection import ProjectSelection
 from gui.project_view import ProjectView
 from gui.runs_view import RunsView
+from gui.services import AppServices
 
 
 class AlertRenderingTests(unittest.TestCase):
     def setUp(self):
+        self.services = AppServices()
         self.state = {
             "authorized": solara.reactive(False),
             "project": solara.reactive(blank_project()),
@@ -31,15 +33,15 @@ class AlertRenderingTests(unittest.TestCase):
 
     def test_warning_screens_render(self):
         self.assert_alerts(
-            ProjectSelection(self.state),
+            ProjectSelection(self.state, self.services),
             [("warning", "Changes are held only in this browser session. Download project JSON to save your work.")],
         )
         self.assert_alerts(
-            ProjectView(self.state),
+            ProjectView(self.state, self.services),
             [("warning", "No automatic save: download this JSON before closing or losing the session.")],
         )
         self.assert_alerts(
-            RunsView(self.state),
+            RunsView(self.state, self.services),
             [("warning", "Configure at least one parameter and an objective first.")],
         )
 

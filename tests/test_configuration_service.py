@@ -2,11 +2,13 @@ import unittest
 from copy import deepcopy
 
 from experiment.model.project import blank_project
-from experiment.services.configuration import delete_configuration, save_configuration
+from experiment.services.configuration import ConfigurationService
+from experiment.services.validation import ProjectValidator
 
 
 class ConfigurationServiceTests(unittest.TestCase):
     def setUp(self):
+        self.service = ConfigurationService(ProjectValidator())
         self.project = blank_project("Test")
         self.project["parameters"] = [{"name": "x", "type": "continuous", "bounds": [0, 10]}]
         self.project["objective"] = {"name": "score", "direction": "maximize"}
@@ -18,7 +20,7 @@ class ConfigurationServiceTests(unittest.TestCase):
 
     def test_rename_keeps_measurements_constraints_and_predictions(self):
         original = deepcopy(self.project)
-        updated = save_configuration(self.project, "parameter", 0, {
+        updated = self.service.save(self.project, "parameter", 0, {
             "name": "temperature", "type": "continuous", "lower": "0", "upper": "10", "choices": "",
         })
         self.assertEqual(self.project, original)
@@ -31,13 +33,13 @@ class ConfigurationServiceTests(unittest.TestCase):
     def test_invalid_changes_leave_original_project_untouched(self):
         original = deepcopy(self.project)
         with self.assertRaises(ValueError):
-            save_configuration(self.project, "parameter", 0, {
+            self.service.save(self.project, "parameter", 0, {
                 "name": "x", "type": "continuous", "lower": "10", "upper": "0", "choices": "",
             })
         self.assertEqual(self.project, original)
 
     def test_deleting_objective_retains_results_but_removes_its_predictions(self):
-        updated = delete_configuration(self.project, "objective", 0)
+        updated = self.service.delete(self.project, "objective", 0)
         self.assertEqual(updated["runs"][0]["results"], {"score": 3})
         self.assertEqual(updated["recommendation_batches"][0]["candidates"][0]["predictions"], {})
         self.assertEqual(self.project["runs"][0]["objective"], 3)

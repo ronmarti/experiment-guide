@@ -69,6 +69,7 @@ def validate_parameters(
 
     numeric = {name: value for name, value in result.items() if isinstance(value, (int, float))}
     for expression, constraint in zip(project.get("parameter_constraints", []), validate_constraints(project)):
+        # An incomplete draft cannot yet be checked against constraints involving missing values.
         if allow_partial and not set(constraint.constraint_dict).issubset(numeric):
             continue
         if not constraint.check(numeric):

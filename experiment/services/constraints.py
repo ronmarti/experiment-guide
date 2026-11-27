@@ -27,6 +27,7 @@ def validate_constraints(project: dict[str, Any]) -> list[ParameterConstraint]:
                 ast.Add, ast.Sub, ast.Mult, ast.Div, ast.UAdd, ast.USub,
                 ast.Name, ast.Load, ast.Constant,
             )
+            # Screen the parsed expression before handing it to Ax; never evaluate user input.
             for node in ast.walk(tree):
                 if not isinstance(node, allowed):
                     raise ValueError("Only numeric linear expressions are supported.")

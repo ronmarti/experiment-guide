@@ -8,7 +8,7 @@ from gui.runs_view import RunsView
 
 
 @solara.component
-def ProjectView(state):
+def ProjectView(state, services):
     project = state["project"].value
     tab = solara.use_reactive(0)
 
@@ -43,6 +43,6 @@ def ProjectView(state):
         ],
     )
     if tab.value == 0:
-        ParameterConfiguration(state)
+        ParameterConfiguration(state, services.configuration)
     elif tab.value == 1:
-        RunsView(state)
+        RunsView(state, services)

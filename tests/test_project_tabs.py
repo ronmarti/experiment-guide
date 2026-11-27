@@ -5,6 +5,7 @@ import solara
 
 from experiment.model.project import blank_project
 from gui.project_view import ProjectView
+from gui.services import AppServices
 
 
 class ProjectTabsTests(unittest.TestCase):
@@ -15,7 +16,7 @@ class ProjectTabsTests(unittest.TestCase):
             "message": solara.reactive(""),
             "message_kind": solara.reactive("info"),
         }
-        _, context = solara.render(ProjectView(state), handle_error=False)
+        _, context = solara.render(ProjectView(state, AppServices()), handle_error=False)
         try:
             context.find(v.Tabs).widget.v_model = 1
             self.assertEqual(context.find(v.Tabs).widget.v_model, 1)

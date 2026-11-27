@@ -4,15 +4,15 @@ import reacton.ipyvuetify as v
 import solara
 
 from experiment.model.project import objectives_for
-from experiment.services.configuration import delete_configuration, save_configuration
 from experiment.services.constraints import validate_constraints
 from gui.alert_message import AlertMessage
 from gui.configuration_row import ConfigurationRow
 
 
 @solara.component
-def ParameterConfiguration(state):
+def ParameterConfiguration(state, configuration):
     project = state["project"].value
+    # Configuration drafts are UI-only until their rows pass validation and are saved.
     parameter_drafts = solara.use_reactive([])
     objective_drafts = solara.use_reactive([])
     constraint_drafts = solara.use_reactive([])
@@ -23,7 +23,7 @@ def ParameterConfiguration(state):
 
     def save(kind, index, draft_id, fields):
         try:
-            state["project"].value = save_configuration(state["project"].value, kind, index, fields)
+            state["project"].value = configuration.save(state["project"].value, kind, index, fields)
             if draft_id is not None:
                 drafts = {"parameter": parameter_drafts, "objective": objective_drafts, "constraint": constraint_drafts}[kind]
                 drafts.value = [entry for entry in drafts.value if entry != draft_id]
@@ -37,7 +37,7 @@ def ParameterConfiguration(state):
             drafts = {"parameter": parameter_drafts, "objective": objective_drafts, "constraint": constraint_drafts}[kind]
             drafts.value = [entry for entry in drafts.value if entry != draft_id]
             return
-        state["project"].value = delete_configuration(state["project"].value, kind, index)
+        state["project"].value = configuration.delete(state["project"].value, kind, index)
         state["message_kind"].value = "success"
         state["message"].value = f"{kind.capitalize()} deleted. Existing measurements are retained."
 

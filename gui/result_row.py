@@ -1,4 +1,3 @@
-import uuid
 from copy import deepcopy
 
 import reacton.ipyvuetify as v
@@ -6,13 +5,11 @@ import solara
 from solara.datatypes import ResultState
 
 from experiment.model.project import objectives_for
-from experiment.services.optimization import predict_candidate
-from experiment.services.runs import delete_run, save_result
 
 
 @solara.component
 def ResultRow(
-    state, parameters, label, results, run_id=None,
+    state, services, parameters, label, results, run_id=None,
     batch_index=None, candidate_index=None, draft_id=None, candidate=None,
     on_delete_recommendation=None, best_results=None,
 ):
@@ -24,11 +21,9 @@ def ResultRow(
     prediction_request = solara.use_reactive(None)
 
     def request_prediction(project, point, persist):
-        prediction_request.value = {
-            "id": str(uuid.uuid4()), "project": deepcopy(project),
-            "point": dict(point), "persist": persist,
-        }
+        prediction_request.value = services.predictions.request(project, point, persist)
 
+    # A saved refresh may be interrupted when leaving the view; resume it on mount.
     def resume_prediction():
         if candidate is not None and candidate.get("prediction_status") == "refresh_required":
             request_prediction(state["project"].value, parameters, True)
@@ -37,23 +32,18 @@ def ResultRow(
     request = prediction_request.value
 
     def calculate_prediction(cancel):
-        if request is None or (not request["persist"] and cancel.wait(0.35)):
-            return None
-        try:
-            predictions = predict_candidate(request["project"], request["point"])
-            return {"id": request["id"], "predictions": predictions, "error": None}
-        except (ValueError, RuntimeError) as exc:
-            return {"id": request["id"], "predictions": None, "error": str(exc)}
+        return services.predictions.calculate(request, cancel)
 
     task = solara.use_thread(calculate_prediction, dependencies=[prediction_request.value], intrusive_cancel=False)
+    # A slower, older request must not replace the most recent preview.
     result = task.value if request and task.value and task.value["id"] == request["id"] else None
 
     def finish_prediction():
         if not request or not result or task.state != ResultState.FINISHED:
             return
         current = state["project"].value
-        model_fields = ("name", "parameters", "objective", "objectives", "parameter_constraints", "runs")
-        if any(current.get(key) != request["project"].get(key) for key in model_fields):
+        # Refit against newer observations or configuration before publishing results.
+        if services.predictions.needs_retry(current, request):
             request_prediction(current, request["point"], request["persist"])
             return
         if not request["persist"]:
@@ -63,20 +53,14 @@ def ResultRow(
                 state["message_kind"].value = "warning"
                 state["message"].value = f"{label} saved. Prediction unavailable: {result['error']}"
             return
-        updated = deepcopy(current)
-        saved = updated["recommendation_batches"][batch_index]["candidates"][candidate_index]
-        if saved["parameters"] != request["point"]:
+        updated = services.predictions.apply(current, request, result, batch_index, candidate_index)
+        if updated is None:
             return
-        if result["predictions"] is None:
-            saved.pop("predictions", None)
-            saved["prediction_status"] = "model_unavailable"
-            if state["message"].value == f"{label} saved. Updating predictions...":
+        if state["message"].value == f"{label} saved. Updating predictions...":
+            if result["predictions"] is None:
                 state["message_kind"].value = "warning"
                 state["message"].value = f"{label} saved. Predictions need at least one observed result."
-        else:
-            saved["predictions"] = result["predictions"]
-            saved.pop("prediction_status", None)
-            if state["message"].value == f"{label} saved. Updating predictions...":
+            else:
                 state["message_kind"].value = "success"
                 state["message"].value = f"{label} saved and predictions updated."
         state["project"].value = updated
@@ -92,7 +76,7 @@ def ResultRow(
     def save():
         try:
             project = deepcopy(state["project"].value)
-            save_result(
+            services.runs.save(
                 project, values.value if "objectives" in project else values.value.get(objectives[0]["name"], ""),
                 run_id=run_id,
                 batch_index=batch_index, candidate_index=candidate_index,
@@ -100,6 +84,7 @@ def ResultRow(
             )
             if candidate is not None:
                 saved = project["recommendation_batches"][batch_index]["candidates"][candidate_index]
+                # Persist the pending refresh so a later visit can finish it.
                 saved.pop("predictions", None)
                 saved["prediction_status"] = "refresh_required"
             state["project"].value = project
@@ -116,7 +101,7 @@ def ResultRow(
         if draft_id is not None:
             project["draft_runs"] = [draft for draft in project["draft_runs"] if draft["id"] != draft_id]
         else:
-            delete_run(project, run_id)
+            services.runs.delete(project, run_id)
         state["project"].value = project
         state["message_kind"].value = "success"
         state["message"].value = "Run deleted."
@@ -135,6 +120,7 @@ def ResultRow(
                 )
         for objective in objectives:
             name = objective["name"]
+            # Highlight only saved best observations, not edited-but-unsaved values.
             is_best = (
                 name in results and best_results is not None
                 and name in best_results and results[name] == best_results[name]

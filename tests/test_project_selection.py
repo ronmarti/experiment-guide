@@ -6,7 +6,7 @@ import ipyvuetify as v
 import solara
 
 from experiment.model.project import blank_project, upgrade_project
-from experiment.services.persistence import load_project_json
+from gui.services import AppServices
 from gui.app import Page
 
 
@@ -106,7 +106,7 @@ class ProjectSelectionTests(unittest.TestCase):
                 expected = blank_project("New project")
                 upgrade_project(expected)
                 self.assertEqual(self.state["project"].value, expected)
-                self.assertEqual(load_project_json(json.dumps(expected).encode()), expected)
+                self.assertEqual(AppServices().files.load_json(json.dumps(expected).encode()), expected)
             finally:
                 context.close()
 

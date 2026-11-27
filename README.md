@@ -46,7 +46,9 @@ are retained when definitions change.
 The Solara entry point is `gui/app.py`; components and session state live in
 `gui/`. Project data helpers are in `experiment/model/`, while validation,
 configuration, persistence, runs, and Ax integration are in
-`experiment/services/`. The project JSON format remains unchanged.
+`experiment/services/`. `gui/services.py` wires the services and their
+dependencies for each session; tests can inject an optimizer or Ax client
+factory. The project JSON format remains unchanged.
 
 Run the unit and UI component tests with:
 

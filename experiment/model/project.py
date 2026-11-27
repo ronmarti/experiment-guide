@@ -1,7 +1,13 @@
+from collections.abc import Iterator
 from typing import Any
 
 SCHEMA_VERSION = 1
 MULTI_SCHEMA_VERSION = 2
+
+
+def iter_candidates(project: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    for batch in project["recommendation_batches"]:
+        yield from batch["candidates"]
 
 
 def blank_project(name: str = "Untitled experiment") -> dict[str, Any]:
@@ -35,6 +41,7 @@ def results_for(project: dict[str, Any], run: dict[str, Any]) -> dict[str, float
 def upgrade_project(project: dict[str, Any]) -> None:
     if "objectives" in project:
         return
+    # Convert legacy single-objective measurements before removing their old representation.
     objectives = objectives_for(project)
     for run in project["runs"]:
         run["results"] = results_for(project, run)

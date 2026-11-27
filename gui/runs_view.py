@@ -1,27 +1,23 @@
 import uuid
-from copy import deepcopy
-from datetime import datetime, timezone
 
 import matplotlib.pyplot as plt
 import reacton.ipyvuetify as v
 import solara
 
 from experiment.model.project import objectives_for, results_for
-from experiment.model.table_order import next_table_order, ordered_table_rows
-from experiment.services.optimization import generate_candidates
-from experiment.services.persistence import MAX_CSV_BYTES, parse_csv
-from experiment.services.runs import add_run, delete_run
+from experiment.model.table_order import ordered_table_rows
 from experiment.services.values import validate_parameters
 from gui.alert_message import AlertMessage
 from gui.result_row import ResultRow
 
 
 @solara.component
-def RunsView(state):
+def RunsView(state, services):
     project = state["project"].value
     objectives = objectives_for(project)
     batch_size = solara.use_reactive(5)
     waiting = solara.use_reactive(False)
+    # Stable keys keep unsaved row edits with the same candidate after a deletion shifts indices.
     candidate_keys = solara.use_ref([])
     for batch_index, batch in enumerate(project["recommendation_batches"]):
         if batch_index == len(candidate_keys.current):
@@ -31,21 +27,12 @@ def RunsView(state):
             keys.append(str(uuid.uuid4()))
 
     def add():
-        updated = deepcopy(state["project"].value)
-        order = next_table_order(updated)
-        updated.setdefault("draft_runs", []).append({
-            "id": str(uuid.uuid4()), "parameters": {}, "table_order": order,
-        })
-        state["project"].value = updated
+        state["project"].value = services.table.add_draft(state["project"].value)
         state["message_kind"].value = "success"
         state["message"].value = "Blank run added. Enter parameters and save the row."
 
     def remove_recommendation(batch_index, candidate_index):
-        updated = deepcopy(state["project"].value)
-        candidates = updated["recommendation_batches"][batch_index]["candidates"]
-        candidate = candidates.pop(candidate_index)
-        if "run_id" in candidate:
-            delete_run(updated, candidate["run_id"])
+        updated = services.table.delete_recommendation(state["project"].value, batch_index, candidate_index)
         candidate_keys.current[batch_index].pop(candidate_index)
         state["project"].value = updated
         state["message_kind"].value = "success"
@@ -53,19 +40,10 @@ def RunsView(state):
 
     def load_csv(file):
         try:
-            data = file["data"]
-            if len(data) > MAX_CSV_BYTES:
-                raise ValueError("CSV upload exceeds the 5 MB size limit.")
-            updated = deepcopy(state["project"].value)
-            imported = parse_csv(updated, data)
-            order = next_table_order(updated)
-            for row in imported:
-                run = add_run(updated, row)
-                run["table_order"] = order
-                order += 1
+            updated, count = services.table.import_csv(state["project"].value, file["data"])
             state["project"].value = updated
             state["message_kind"].value = "success"
-            state["message"].value = f"Imported {len(imported)} runs."
+            state["message"].value = f"Imported {count} runs."
         except ValueError as exc:
             state["message_kind"].value = "error"
             state["message"].value = str(exc)
@@ -73,24 +51,11 @@ def RunsView(state):
     def generate():
         waiting.value = True
         try:
-            updated = deepcopy(state["project"].value)
-            candidates = generate_candidates(updated, batch_size.value)
-            if not candidates:
-                raise RuntimeError("No recommendations were generated. Try a different batch size.")
-            order = next_table_order(updated)
-            for candidate in candidates:
-                candidate["table_order"] = order
-                order += 1
-            updated["recommendation_batches"].append({
-                "id": str(uuid.uuid4()),
-                "batch_size": len(candidates),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "candidates": candidates,
-            })
+            updated, unavailable = services.table.generate(state["project"].value, batch_size.value)
             state["project"].value = updated
             state["message_kind"].value = "success"
-            state["message"].value = f"Generated {len(candidates)} recommendations."
-            if any(candidate.get("prediction_status") == "model_unavailable" for candidate in candidates):
+            state["message"].value = f"Generated {updated['recommendation_batches'][-1]['batch_size']} recommendations."
+            if unavailable:
                 state["message_kind"].value = "warning"
                 state["message"].value += " Predictions are unavailable until Ax fits a predictive model; add observations and generate again."
         except (ValueError, RuntimeError) as exc:
@@ -123,12 +88,12 @@ def RunsView(state):
                     for kind, row, batch_index, candidate_index in rows:
                         if kind == "run":
                             ResultRow(
-                                state, row["parameters"], f"Run {row['id']}",
+                                state, services, row["parameters"], f"Run {row['id']}",
                                 results_for(project, row), run_id=row["id"], best_results=best_results,
                             ).key(f"run-{row['id']}")
                         elif kind == "draft":
                             ResultRow(
-                                state, row["parameters"], f"New run {row['id'][:8]}",
+                                state, services, row["parameters"], f"New run {row['id'][:8]}",
                                 {}, draft_id=row["id"], best_results=best_results,
                             ).key(f"draft-{row['id']}")
                         else:
@@ -137,7 +102,7 @@ def RunsView(state):
                             run = runs_by_id.get(run_id)
                             label = f"Batch {batch_index + 1}, recommendation {candidate_index + 1}"
                             ResultRow(
-                                state, row["parameters"], label,
+                                state, services, row["parameters"], label,
                                 results_for(project, run) if run else {}, run_id=run_id,
                                 batch_index=batch_index, candidate_index=candidate_index,
                                 candidate=row, best_results=best_results,

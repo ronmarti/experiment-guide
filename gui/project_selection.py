@@ -1,13 +1,12 @@
 import solara
 
 from experiment.model.project import blank_project, upgrade_project
-from experiment.services.persistence import load_project_json
 from gui.alert_message import AlertMessage
 from gui.session import set_project
 
 
 @solara.component
-def ProjectSelection(state):
+def ProjectSelection(state, services):
     project_name = solara.use_reactive("Untitled experiment")
 
     def create_project():
@@ -22,7 +21,7 @@ def ProjectSelection(state):
             data = file["data"]
             if len(data) > 10 * 1024 * 1024:
                 raise ValueError("Project JSON exceeds the 10 MB size limit.")
-            project = load_project_json(data)
+            project = services.files.load_json(data)
             set_project(state, project)
             state["message_kind"].value = "success"
             state["message"].value = "Project loaded."
