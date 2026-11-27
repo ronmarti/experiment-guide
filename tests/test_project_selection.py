@@ -5,7 +5,8 @@ from unittest.mock import patch
 import ipyvuetify as v
 import solara
 
-from experiment_core import blank_project, load_project_json, upgrade_project
+from experiment.model.project import blank_project, upgrade_project
+from experiment.services.persistence import load_project_json
 from gui.app import Page
 
 
@@ -20,7 +21,7 @@ class ProjectSelectionTests(unittest.TestCase):
 
     def test_enter_submits_key_without_leaving_input(self):
         with patch("gui.app.session_state", return_value=self.state), \
-             patch("gui.app.ACCESS_KEY", "test-key"):
+             patch("gui.startup.ACCESS_KEY", "test-key"):
             _, context = solara.render(Page(), handle_error=False)
             try:
                 field = context.find(v.TextField).widget
@@ -51,8 +52,8 @@ class ProjectSelectionTests(unittest.TestCase):
             solara.Button(label, on_click=lambda: on_file(upload))
 
         with patch("gui.app.session_state", return_value=self.state), \
-             patch("gui.app.ACCESS_KEY", "test-key"), \
-             patch("gui.app.solara.FileDrop", file_drop):
+             patch("gui.startup.ACCESS_KEY", "test-key"), \
+             patch("solara.FileDrop", file_drop):
             _, context = solara.render(Page(), handle_error=False)
             try:
                 def click(label):
@@ -90,7 +91,7 @@ class ProjectSelectionTests(unittest.TestCase):
 
     def test_login_then_create_blank_project(self):
         with patch("gui.app.session_state", return_value=self.state), \
-             patch("gui.app.ACCESS_KEY", "test-key"):
+             patch("gui.startup.ACCESS_KEY", "test-key"):
             _, context = solara.render(Page(), handle_error=False)
             try:
                 field = context.find(v.TextField).widget

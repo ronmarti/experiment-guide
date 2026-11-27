@@ -3,8 +3,8 @@ import unittest
 import ipyvuetify as v
 import solara
 
-from experiment_core import blank_project
-from gui.app import ProjectView
+from experiment.model.project import blank_project
+from gui.project_view import ProjectView
 
 
 class ProjectTabsTests(unittest.TestCase):

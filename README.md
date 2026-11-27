@@ -41,6 +41,19 @@ constraints in their respective tables. Save each row before leaving the
 screen. Multiple objectives are optimized simultaneously; existing measurements
 are retained when definitions change.
 
+## Source layout and tests
+
+The Solara entry point is `gui/app.py`; components and session state live in
+`gui/`. Project data helpers are in `experiment/model/`, while validation,
+configuration, persistence, runs, and Ax integration are in
+`experiment/services/`. The project JSON format remains unchanged.
+
+Run the unit and UI component tests with:
+
+```sh
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 poetry run python -m unittest discover -s tests -v
+```
+
 ## Try it out
 
 Try the python method with some noise:

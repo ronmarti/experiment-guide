@@ -3,8 +3,11 @@ import unittest
 import ipyvuetify as v
 import solara
 
-from experiment_core import blank_project
-from gui.app import AlertMessage, ProjectSelection, ProjectView, RunsView
+from experiment.model.project import blank_project
+from gui.alert_message import AlertMessage
+from gui.project_selection import ProjectSelection
+from gui.project_view import ProjectView
+from gui.runs_view import RunsView
 
 
 class AlertRenderingTests(unittest.TestCase):

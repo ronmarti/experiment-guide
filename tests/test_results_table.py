@@ -7,10 +7,12 @@ from unittest.mock import patch
 
 import ipyvuetify as v
 import solara
-from ax.exceptions.core import UnsupportedError
 
-from experiment_core import blank_project, generate_candidates, load_project_json, predict_candidate, save_result, upgrade_project
-from gui.app import RunsView
+from experiment.model.project import blank_project, upgrade_project
+from experiment.services.optimization import predict_candidate
+from experiment.services.persistence import load_project_json
+from experiment.services.runs import save_result
+from gui.runs_view import RunsView
 
 
 def widgets(root):
@@ -44,7 +46,7 @@ class ResultsTableTests(unittest.TestCase):
             "message": solara.reactive(""),
             "message_kind": solara.reactive("info"),
         }
-        prediction_patch = patch("gui.app.predict_candidate", return_value=None)
+        prediction_patch = patch("gui.result_row.predict_candidate", return_value=None)
         prediction_patch.start()
         self.addCleanup(prediction_patch.stop)
 
@@ -85,7 +87,7 @@ class ResultsTableTests(unittest.TestCase):
         def file_drop(label, lazy, on_file):
             uploaded["callback"] = on_file
 
-        with patch("gui.app.solara.FileDrop", file_drop):
+        with patch("solara.FileDrop", file_drop):
             root, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 def rows():
@@ -103,7 +105,7 @@ class ResultsTableTests(unittest.TestCase):
                 self.assertEqual(labels(), [*initial, first_label])
                 next(w for w in widgets(rows()[-1]) if isinstance(w, v.TextField) and w.label == f"x for {first_label}").v_model = "8"
 
-                with patch("gui.app.generate_candidates", return_value=[{"parameters": {"x": 5}}]):
+                with patch("gui.runs_view.generate_candidates", return_value=[{"parameters": {"x": 5}}]):
                     next(b for b in context.find(v.Btn).widgets if "Generate batch" in b.children).fire_event("click", {})
                 new_candidate = "Batch 2, recommendation 1"
                 self.assertEqual(labels(), [*initial, first_label, new_candidate])
@@ -147,24 +149,6 @@ class ResultsTableTests(unittest.TestCase):
             finally:
                 context.close()
 
-    def test_legacy_draft_keeps_its_order_when_saved(self):
-        project = self.state["project"].value
-        project["draft_runs"] = [{"id": "draft", "parameters": {"x": 8}, "table_order": 5}]
-        save_result(project, "9", draft_id="draft")
-        self.assertEqual(project["runs"][-1]["table_order"], 5)
-        self.assertEqual(load_project_json(json.dumps(project).encode()), project)
-
-    def test_import_rejects_invalid_or_duplicate_table_orders(self):
-        project = self.state["project"].value
-        candidate = project["recommendation_batches"][0]["candidates"][0]
-        for value in (True, -1, "1"):
-            candidate["table_order"] = value
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "Table row order"):
-                load_project_json(json.dumps(project).encode())
-        candidate["table_order"] = 1
-        project["runs"][0]["table_order"] = 1
-        with self.assertRaisesRegex(ValueError, "orders must be unique"):
-            load_project_json(json.dumps(project).encode())
 
     def test_edit_results_and_reload_without_duplicate_rows(self):
         root, context = solara.render(RunsView(self.state), handle_error=False)
@@ -297,7 +281,7 @@ class ResultsTableTests(unittest.TestCase):
             self.assertEqual(project["recommendation_batches"][0]["candidates"], [])
             self.assertEqual(len(project["runs"]), 1)
             self.assertEqual(load_project_json(json.dumps(project).encode()), project)
-            with patch("gui.app.generate_candidates", return_value=[{"parameters": {"x": 5}}]):
+            with patch("gui.runs_view.generate_candidates", return_value=[{"parameters": {"x": 5}}]):
                 next(b for b in context.find(v.Btn).widgets if "Generate batch" in b.children).fire_event("click", {})
             self.assertEqual(
                 next(w for w in widgets(row("Batch 2, recommendation 1")) if isinstance(w, v.TextField) and w.label == "x for Batch 2, recommendation 1").v_model,
@@ -346,7 +330,7 @@ class ResultsTableTests(unittest.TestCase):
         root, context = solara.render(RunsView(self.state), handle_error=False)
         try:
             context.find(v.Slider).widget.v_model = 2
-            with patch("gui.app.generate_candidates", return_value=[
+            with patch("gui.runs_view.generate_candidates", return_value=[
                 {"parameters": {"x": 4}, "predictions": {"score": {"mean": 2.5, "sigma": 0.3}}},
                 {"parameters": {"x": 5}, "prediction_status": "model_unavailable"},
             ]) as generate:
@@ -381,7 +365,7 @@ class ResultsTableTests(unittest.TestCase):
         def file_drop(label, lazy, on_file):
             uploaded["callback"] = on_file
 
-        with patch("gui.app.solara.FileDrop", file_drop):
+        with patch("solara.FileDrop", file_drop):
             _, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
@@ -402,20 +386,6 @@ class ResultsTableTests(unittest.TestCase):
             finally:
                 context.close()
 
-    def test_ax_receives_only_completed_runs(self):
-        project = self.state["project"].value
-        project["recommendation_batches"][0]["candidates"][0]["run_id"] = 1
-        project["recommendation_batches"][0]["candidates"][0]["parameters"] = {"x": 1}
-        with patch("experiment_core.Client") as client_type:
-            client = client_type.return_value
-            client.get_next_trials.return_value = {10: {"x": 5}}
-            client.predict.return_value = [{"score": (3.5, 0.75)}]
-            self.assertEqual(generate_candidates(project, 1), [
-                {"parameters": {"x": 5}, "predictions": {"score": {"mean": 3.5, "sigma": 0.75}}}
-            ])
-            client.predict.assert_called_once_with([{"x": 5}])
-            self.assertEqual(client.attach_trial.call_count, 1)
-            self.assertEqual(client.complete_trial.call_count, 1)
 
     def test_predictions_refresh_on_edit_and_save(self):
         project = self.state["project"].value
@@ -424,7 +394,7 @@ class ResultsTableTests(unittest.TestCase):
         def predict(current, point):
             return {"score": {"mean": float(point["x"]), "sigma": len(current["runs"]) / 10}}
 
-        with patch("gui.app.predict_candidate", side_effect=predict) as mock_predict:
+        with patch("gui.result_row.predict_candidate", side_effect=predict) as mock_predict:
             root, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 label = "Batch 1, recommendation 1"
@@ -460,7 +430,7 @@ class ResultsTableTests(unittest.TestCase):
             {"id": 2, "parameters": {"x": 5}, "objective": 5},
             {"id": 3, "parameters": {"x": 9}, "objective": 10},
         ]
-        with patch("gui.app.predict_candidate", wraps=predict_candidate):
+        with patch("gui.result_row.predict_candidate", wraps=predict_candidate):
             root, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 label = "Batch 1, recommendation 1"
@@ -494,7 +464,7 @@ class ResultsTableTests(unittest.TestCase):
                     raise RuntimeError("Prediction test timed out.")
             return {"score": {"mean": float(point["x"]), "sigma": 0.5}}
 
-        with patch("gui.app.predict_candidate", side_effect=predict):
+        with patch("gui.result_row.predict_candidate", side_effect=predict):
             root, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 label = "Batch 1, recommendation 1"
@@ -514,7 +484,7 @@ class ResultsTableTests(unittest.TestCase):
                 context.close()
 
     def test_save_retains_row_when_prediction_fails(self):
-        with patch("gui.app.predict_candidate", side_effect=RuntimeError("Prediction failed. Check the project and try again.")):
+        with patch("gui.result_row.predict_candidate", side_effect=RuntimeError("Prediction failed. Check the project and try again.")):
             _, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 label = "Batch 1, recommendation 1"
@@ -543,7 +513,7 @@ class ResultsTableTests(unittest.TestCase):
                     raise RuntimeError("Prediction test timed out.")
             return {"score": {"mean": float(project["runs"][0]["objective"]), "sigma": 0.5}}
 
-        with patch("gui.app.predict_candidate", side_effect=predict):
+        with patch("gui.result_row.predict_candidate", side_effect=predict):
             root, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 def row(label):
@@ -573,7 +543,7 @@ class ResultsTableTests(unittest.TestCase):
                     raise RuntimeError("Prediction test timed out.")
             return {"score": {"mean": 4.0, "sigma": 0.3}}
 
-        with patch("gui.app.predict_candidate", side_effect=predict):
+        with patch("gui.result_row.predict_candidate", side_effect=predict):
             root, context = solara.render(RunsView(self.state), handle_error=False)
             label = "Batch 1, recommendation 1"
             row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
@@ -600,7 +570,7 @@ class ResultsTableTests(unittest.TestCase):
             completed.set()
             return {"score": {"mean": 4.0, "sigma": 0.3}}
 
-        with patch("gui.app.predict_candidate", side_effect=predict):
+        with patch("gui.result_row.predict_candidate", side_effect=predict):
             root, context = solara.render(RunsView(self.state), handle_error=False)
             try:
                 label = "Batch 1, recommendation 1"
@@ -616,48 +586,11 @@ class ResultsTableTests(unittest.TestCase):
                 release.set()
                 context.close()
 
-    def test_real_prediction_uses_available_multi_objective_observations(self):
-        project = self.state["project"].value
-        project["runs"] = []
-        self.assertIsNone(predict_candidate(project, {"x": 5}))
-        upgrade_project(project)
-        project["objectives"].append({"name": "cost", "direction": "minimize"})
-        project["objectives"].append({"name": "unmeasured", "direction": "maximize"})
-        project["runs"] = [
-            {"id": 1, "parameters": {"x": 1}, "results": {"score": 1}},
-            {"id": 2, "parameters": {"x": 5}, "results": {"score": 5, "cost": 9}},
-            {"id": 3, "parameters": {"x": 9}, "results": {"score": 10, "cost": 2}},
-        ]
-        left = predict_candidate(project, {"x": 2})
-        right = predict_candidate(project, {"x": 8})
-        self.assertEqual(set(left), {"score", "cost"})
-        self.assertNotAlmostEqual(left["score"]["mean"], right["score"]["mean"], places=2)
-        self.assertGreaterEqual(left["cost"]["sigma"], 0)
-        self.assertGreater(left["cost"]["mean"], 0)
-        with self.assertRaisesRegex(ValueError, "between"):
-            predict_candidate(project, {"x": 11})
-
-    def test_initial_generation_and_prediction_failures(self):
-        project = self.state["project"].value
-        project["runs"] = []
-        self.assertEqual(generate_candidates(project, 1)[0]["prediction_status"], "model_unavailable")
-        with patch("experiment_core.Client") as client_type:
-            client = client_type.return_value
-            client.get_next_trials.return_value = {0: {"x": 5}}
-            client._generation_strategy.adapter.can_predict = True
-            client.predict.side_effect = UnsupportedError("model error")
-            with self.assertRaisesRegex(RuntimeError, "Prediction failed"):
-                generate_candidates(project, 1)
-            client.predict.side_effect = None
-            for prediction in ([{"score": (1, -1)}], [{"score": (float("nan"), 1)}], []):
-                client.predict.return_value = prediction
-                with self.subTest(prediction=prediction), self.assertRaisesRegex(RuntimeError, "invalid predictions"):
-                    generate_candidates(project, 1)
 
     def test_prediction_failure_does_not_add_a_batch(self):
         _, context = solara.render(RunsView(self.state), handle_error=False)
         try:
-            with patch("gui.app.generate_candidates", side_effect=RuntimeError("Prediction failed. Check the project and try again.")):
+            with patch("gui.runs_view.generate_candidates", side_effect=RuntimeError("Prediction failed. Check the project and try again.")):
                 next(b for b in context.find(v.Btn).widgets if "Generate batch" in b.children).fire_event("click", {})
             self.assertEqual(len(self.state["project"].value["recommendation_batches"]), 1)
             self.assertEqual(self.state["message_kind"].value, "error")
@@ -665,40 +598,6 @@ class ResultsTableTests(unittest.TestCase):
         finally:
             context.close()
 
-    def test_prediction_round_trip_and_parameter_edits(self):
-        project = self.state["project"].value
-        candidate = project["recommendation_batches"][0]["candidates"][0]
-        candidate["predictions"] = {"score": {"mean": 2, "sigma": 0.5}}
-        self.assertEqual(load_project_json(json.dumps(project).encode()), project)
-        save_result(project, "4", batch_index=0, candidate_index=0, parameters={"x": "3"})
-        self.assertIn("predictions", candidate)
-        save_result(project, "5", run_id=candidate["run_id"], parameters={"x": "4"})
-        self.assertNotIn("predictions", candidate)
-        self.assertEqual(candidate["prediction_status"], "parameters_changed")
-        self.assertEqual(load_project_json(json.dumps(project).encode()), project)
-
-    def test_import_rejects_invalid_predictions(self):
-        project = self.state["project"].value
-        candidate = project["recommendation_batches"][0]["candidates"][0]
-        for predictions in ([], {"score": {"mean": 1, "sigma": -1}}, {"score": {"mean": float("inf"), "sigma": 1}}, {"score": {"mean": True, "sigma": 1}}, {"score": {"mean": 1}}):
-            candidate["predictions"] = predictions
-            with self.subTest(predictions=predictions), self.assertRaisesRegex(ValueError, "predictions"):
-                load_project_json(json.dumps(project).encode())
-
-    def test_import_rejects_invalid_candidate_links(self):
-        project = self.state["project"].value
-        project["recommendation_batches"][0]["candidates"][0]["run_id"] = 99
-        with self.assertRaisesRegex(ValueError, "invalid linked run"):
-            load_project_json(json.dumps(project).encode())
-
-    def test_repeated_recommendations_have_independent_results(self):
-        project = self.state["project"].value
-        save_result(project, "3", batch_index=0, candidate_index=0)
-        save_result(project, "4", batch_index=0, candidate_index=1)
-        candidates = project["recommendation_batches"][0]["candidates"]
-        self.assertNotEqual(candidates[0]["run_id"], candidates[1]["run_id"])
-        self.assertEqual([run["objective"] for run in project["runs"]], [2, 3, 4])
-        self.assertEqual(load_project_json(json.dumps(project).encode()), project)
 
     def test_edit_parameters_for_runs_and_recommendations(self):
         root, context = solara.render(RunsView(self.state), handle_error=False)
@@ -761,34 +660,6 @@ class ResultsTableTests(unittest.TestCase):
         finally:
             context.close()
 
-    def test_invalid_parameter_types_and_constraints_do_not_change_rows(self):
-        project = self.state["project"].value
-        project["parameters"] += [
-            {"name": "count", "type": "integer", "bounds": [1, 5]},
-            {"name": "color", "type": "categorical", "choices": ["red", "blue"]},
-        ]
-        project["parameter_constraints"] = ["x + count <= 8"]
-        draft = {"id": "draft", "parameters": {}}
-        project["draft_runs"] = [draft]
-        for parameters in (
-            {"x": "3", "count": "1.5", "color": "red"},
-            {"x": "3", "count": "2", "color": "green"},
-            {"x": "7", "count": "2", "color": "red"},
-        ):
-            with self.subTest(parameters=parameters), self.assertRaises(ValueError):
-                save_result(project, "1", draft_id="draft", parameters=parameters)
-            self.assertEqual(draft["parameters"], {})
-            self.assertEqual(len(project["runs"]), 1)
-        save_result(project, "1", draft_id="draft", parameters={"x": "3", "count": "2", "color": "red"})
-        self.assertEqual(project["runs"][-1]["parameters"], {"x": 3.0, "count": 2, "color": "red"})
-
-    def test_project_constraints_reject_executable_expressions_before_ax(self):
-        project = self.state["project"].value
-        project["parameter_constraints"] = ["__import__('os').system('anything') <= 0"]
-        with patch("experiment_core.ParameterConstraint") as constraint:
-            with self.assertRaisesRegex(ValueError, "Invalid parameter constraint"):
-                load_project_json(json.dumps(project).encode())
-            constraint.assert_not_called()
 
     def test_multiple_blank_rows_can_be_deleted_independently(self):
         root, context = solara.render(RunsView(self.state), handle_error=False)

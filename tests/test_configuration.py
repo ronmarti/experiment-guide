@@ -6,10 +6,12 @@ import ipyvuetify as v
 import solara
 from solara.util import IPYVUETIFY_V3
 
-from experiment_core import (
-    blank_project, generate_candidates, load_project_json, parse_csv, save_result, upgrade_project,
-)
-from gui.app import ParameterConfiguration, RunsView
+from experiment.model.project import blank_project, upgrade_project
+from experiment.services.optimization import generate_candidates
+from experiment.services.persistence import load_project_json, parse_csv
+from experiment.services.runs import save_result
+from gui.configuration import ParameterConfiguration
+from gui.runs_view import RunsView
 from test_results_table import widgets
 
 
@@ -27,7 +29,7 @@ class ConfigurationTests(unittest.TestCase):
             "message": solara.reactive(""),
             "message_kind": solara.reactive("info"),
         }
-        prediction_patch = patch("gui.app.predict_candidate", return_value=None)
+        prediction_patch = patch("gui.result_row.predict_candidate", return_value=None)
         prediction_patch.start()
         self.addCleanup(prediction_patch.stop)
 
@@ -128,7 +130,7 @@ class ConfigurationTests(unittest.TestCase):
         upgrade_project(project)
         project["objectives"].append({"name": "cost", "direction": "minimize"})
         project["runs"].append({"id": 2, "parameters": {"x": 4}, "results": {"cost": 8}})
-        with patch("experiment_core.Client") as client_type:
+        with patch("experiment.services.optimization.Client") as client_type:
             client = client_type.return_value
             client.get_next_trials.return_value = {2: {"x": 6}}
             client.predict.return_value = [{"score": (2, 0.5), "cost": (8, 1.2)}]
