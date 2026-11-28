@@ -4,13 +4,24 @@ import solara
 from solara import lab
 
 from gui.configuration import ParameterConfiguration
+from gui.project_upload import ProjectUpload
 from gui.runs_view import RunsView
+from gui.session import set_project
 
 
 @solara.component
 def ProjectView(state, services):
     project = state["project"].value
     tab = solara.use_reactive(0)
+    switching = solara.use_reactive(False)
+
+    def replace_project(replacement):
+        # Unmount editable rows and prediction tasks before installing the new project.
+        switching.value = True
+        try:
+            set_project(state, replacement)
+        finally:
+            switching.value = False
 
     def name_project(value):
         project["name"] = value or "Untitled experiment"
@@ -34,15 +45,20 @@ def ProjectView(state, services):
     solara.Warning(
         "No automatic save: download this JSON before closing or losing the session.",
     )
-
-    lab.Tabs(
-        value=tab,
-        children=[
-            lab.Tab("Configuration"),
-            lab.Tab("Runs and recommendations"),
-        ],
+    solara.Markdown(
+        "Upload another project JSON to replace the current project. Download the current project first to keep its changes."
     )
-    if tab.value == 0:
-        ParameterConfiguration(state, services.configuration)
-    elif tab.value == 1:
-        RunsView(state, services)
+    ProjectUpload(state, services, on_load=replace_project)
+
+    if not switching.value:
+        lab.Tabs(
+            value=tab,
+            children=[
+                lab.Tab("Configuration"),
+                lab.Tab("Runs and recommendations"),
+            ],
+        )
+        if tab.value == 0:
+            ParameterConfiguration(state, services.configuration)
+        elif tab.value == 1:
+            RunsView(state, services)

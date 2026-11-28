@@ -41,3 +41,19 @@ class PredictionControllerTests(unittest.TestCase):
         self.assertEqual(result["error"], "model failed")
         with self.assertRaisesRegex(ValueError, "model failed"):
             self.controller.apply(self.project, request, result, 0, 0)
+
+    def test_manual_targets_and_non_model_metadata(self):
+        self.project["runs"] = [{"id": 1, "parameters": {"x": 2}, "objective": 3}]
+        self.project["draft_runs"] = [{"id": "draft", "parameters": {"x": 2}}]
+        request = self.controller.request(self.project, {"x": 2}, True)
+        result = {"id": "request-id", "predictions": {"score": {"mean": 4, "sigma": 1}}, "error": None}
+        updated = self.controller.apply(self.project, request, result, run_id=1)
+        self.assertEqual(updated["runs"][0]["predictions"], result["predictions"])
+        self.assertFalse(self.controller.needs_retry(updated, request))
+        updated = self.controller.apply(updated, request, result, draft_id="draft")
+        self.assertEqual(updated["draft_runs"][0]["predictions"], result["predictions"])
+        updated["draft_runs"].clear()
+        self.assertIsNone(self.controller.apply(updated, request, result, draft_id="draft"))
+        updated["runs"][0]["parameters"]["x"] = 5
+        self.assertIsNone(self.controller.apply(updated, request, result, run_id=1))
+        self.assertTrue(self.controller.needs_retry(updated, request))

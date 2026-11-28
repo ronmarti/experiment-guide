@@ -165,15 +165,6 @@ class ProjectValidator:
         """Validate a recommendation's predictions, parameters, and optional run link."""
         if not isinstance(candidate, dict) or not isinstance(candidate.get("parameters"), dict):
             raise ValueError("Each recommendation must contain parameter values.")
-        if "predictions" in candidate:
-            self._validate_predictions(candidate["predictions"])
-        if "prediction_status" in candidate and (
-            candidate["prediction_status"] not in (
-                "model_unavailable", "parameters_changed", "configuration_changed", "refresh_required",
-            )
-            or "predictions" in candidate
-        ):
-            raise ValueError("Invalid recommendation prediction status.")
         if project["schema_version"] == MULTI_SCHEMA_VERSION:
             validate_stored_parameters(candidate["parameters"])
         if "run_id" not in candidate:
@@ -193,7 +184,7 @@ class ProjectValidator:
     def _validate_predictions(self, predictions: Any) -> None:
         """Require finite prediction means and nonnegative finite standard deviations."""
         if not isinstance(predictions, dict):
-            raise ValueError("Recommendation predictions must be an object.")
+            raise ValueError("Row predictions must be an object.")
         for name, prediction in predictions.items():
             if (
                 not isinstance(name, str)
@@ -204,7 +195,19 @@ class ProjectValidator:
                 or not is_finite_number(prediction["sigma"])
                 or prediction["sigma"] < 0
             ):
-                raise ValueError("Recommendation predictions must have finite means and nonnegative finite sigmas.")
+                raise ValueError("Row predictions must have finite means and nonnegative finite sigmas.")
+
+    def _validate_prediction_row(self, row: dict[str, Any]) -> None:
+        """Validate optional prediction snapshots and refresh status for a table row."""
+        if "predictions" in row:
+            self._validate_predictions(row["predictions"])
+        if "prediction_status" in row and (
+            row["prediction_status"] not in (
+                "model_unavailable", "parameters_changed", "configuration_changed", "refresh_required",
+            )
+            or "predictions" in row
+        ):
+            raise ValueError("Invalid prediction status.")
 
     def _validate_drafts(self, project: dict[str, Any]) -> None:
         """Validate draft identifiers and stored parameter values for the active schema."""
@@ -236,6 +239,9 @@ class ProjectValidator:
             *runs, *drafts, *(candidate for batch in batches for candidate in batch["candidates"]),
         ]
         for row in all_rows:
+            self._validate_prediction_row(row)
+            if "notes" in row and not isinstance(row["notes"], str):
+                raise ValueError("Run and notes must be a string.")
             if "table_order" in row and (
                 not isinstance(row["table_order"], int)
                 or isinstance(row["table_order"], bool)

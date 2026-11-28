@@ -20,6 +20,14 @@ def widgets(root):
             yield from widgets(child)
 
 
+def row_label(row):
+    return next(
+        (field.v_model for field in widgets(row.children[0])
+         if isinstance(field, v.TextField) and field.label == "Run and notes"),
+        None,
+    )
+
+
 def wait_for(predicate, timeout=10):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -82,6 +90,80 @@ class ResultsTableTests(unittest.TestCase):
         finally:
             context.close()
 
+    def test_edit_notes_for_each_row_and_restore_after_draft_conversion(self):
+        project = self.state["project"].value
+        upgrade_project(project)
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+        try:
+            def row(label):
+                return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                            and w.children and row_label(w) == label)
+
+            def edit_notes(label, notes):
+                current = row(label)
+                next(w for w in widgets(current) if isinstance(w, v.TextField) and w.label == "Run and notes").v_model = notes
+                next(w for w in widgets(current) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+
+            edit_notes("Run 1", "Control run")
+            edit_notes("Batch 1, recommendation 1", "Promising candidate")
+            next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
+            draft = self.state["project"].value["draft_runs"][0]
+            edit_notes(f"New run {draft['id'][:8]}", "My draft")
+            draft_row = row("My draft")
+            next(w for w in widgets(draft_row) if isinstance(w, v.TextField) and w.label == "score").v_model = "5"
+            next(w for w in widgets(draft_row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+
+            project = self.state["project"].value
+            self.assertEqual(project["runs"][0]["notes"], "Control run")
+            self.assertEqual(project["runs"][-1]["notes"], "My draft")
+            self.assertEqual(project["recommendation_batches"][0]["candidates"][0]["notes"], "Promising candidate")
+            restored = self.services.files.load_json(json.dumps(project).encode())
+        finally:
+            context.close()
+
+        self.state["project"].value = restored
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+        try:
+            self.assertIsNotNone(row("Control run"))
+            self.assertIsNotNone(row("Promising candidate"))
+            self.assertIsNotNone(row("My draft"))
+            candidate_row = row("Promising candidate")
+            next(w for w in widgets(candidate_row) if isinstance(w, v.TextField) and w.label == "score").v_model = "7"
+            next(w for w in widgets(candidate_row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+            self.assertIsNotNone(row("Promising candidate"))
+            edit_notes("Promising candidate", "")
+            self.assertEqual(self.state["project"].value["recommendation_batches"][0]["candidates"][0]["notes"], "")
+            self.assertEqual(
+                self.services.files.load_json(json.dumps(self.state["project"].value).encode())
+                ["recommendation_batches"][0]["candidates"][0]["notes"], "",
+            )
+        finally:
+            context.close()
+
+    def test_objectives_are_visibly_separated_and_inputs_use_names(self):
+        project = self.state["project"].value
+        upgrade_project(project)
+        project["parameters"].append({"name": "y", "type": "continuous", "bounds": [0, 10]})
+        project["objectives"].append({"name": "cost", "direction": "minimize"})
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+        try:
+            table = next(w for w in widgets(root) if getattr(w, "tag", None) == "table")
+            header, *rows = [w for w in widgets(table) if getattr(w, "tag", None) == "tr"]
+            self.assertEqual(header.children[0].children, ["Run and notes"])
+            self.assertEqual(
+                [cell.children[0] for cell in header.children],
+                ["Run and notes", "x", "y", "score observed", "score predicted mean ± sigma",
+                 "cost observed", "cost predicted mean ± sigma", "Actions"],
+            )
+            self.assertIn("border-left: 3px", header.children[3].style_)
+            for row in rows:
+                fields = [w.label for w in widgets(row) if isinstance(w, v.TextField)]
+                self.assertEqual(fields, ["Run and notes", "x", "y", "score", "cost"])
+                self.assertEqual(len(row.children), len(header.children))
+                self.assertIn("border-left: 3px", row.children[3].style_)
+        finally:
+            context.close()
+
     def test_runs_and_recommendations_keep_insertion_order_after_save_and_reload(self):
         project = self.state["project"].value
         upgrade_project(project)
@@ -99,7 +181,7 @@ class ResultsTableTests(unittest.TestCase):
                     return [w for w in widgets(table) if getattr(w, "tag", None) == "tr"][1:]
 
                 def labels():
-                    return [row.children[0].children[0] for row in rows()]
+                    return [row_label(row) for row in rows()]
 
                 initial = ["Run 1", "Batch 1, recommendation 1", "Batch 1, recommendation 2"]
                 self.assertEqual(labels(), initial)
@@ -107,21 +189,21 @@ class ResultsTableTests(unittest.TestCase):
                 first_draft = self.state["project"].value["draft_runs"][0]
                 first_label = f"New run {first_draft['id'][:8]}"
                 self.assertEqual(labels(), [*initial, first_label])
-                next(w for w in widgets(rows()[-1]) if isinstance(w, v.TextField) and w.label == f"x for {first_label}").v_model = "8"
+                next(w for w in widgets(rows()[-1]) if isinstance(w, v.TextField) and w.label == "x").v_model = "8"
 
                 with patch.object(self.services.optimizer, "generate", return_value=[{"parameters": {"x": 5}}]):
                     next(b for b in context.find(v.Btn).widgets if "Generate batch" in b.children).fire_event("click", {})
                 new_candidate = "Batch 2, recommendation 1"
                 self.assertEqual(labels(), [*initial, first_label, new_candidate])
                 first_row = rows()[-2]
-                self.assertEqual(next(w for w in widgets(first_row) if isinstance(w, v.TextField) and w.label == f"x for {first_label}").v_model, "8")
+                self.assertEqual(next(w for w in widgets(first_row) if isinstance(w, v.TextField) and w.label == "x").v_model, "8")
 
                 next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
                 second_draft = self.state["project"].value["draft_runs"][1]
                 second_label = f"New run {second_draft['id'][:8]}"
                 self.assertEqual(labels(), [*initial, first_label, new_candidate, second_label])
                 first_row = rows()[-3]
-                next(w for w in widgets(first_row) if isinstance(w, v.TextField) and w.label == f"Result for {first_label}").v_model = "9"
+                next(w for w in widgets(first_row) if isinstance(w, v.TextField) and w.label == "score").v_model = "9"
                 next(w for w in widgets(first_row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 expected = [*initial, "Run 2", new_candidate, second_label]
                 self.assertEqual(labels(), expected)
@@ -138,14 +220,14 @@ class ResultsTableTests(unittest.TestCase):
             root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
             try:
                 self.assertEqual(labels(), expected)
-                draft_row = next(row for row in rows() if row.children[0].children[0] == second_label)
-                next(w for w in widgets(draft_row) if isinstance(w, v.TextField) and w.label == f"x for {second_label}").v_model = "7"
+                draft_row = next(row for row in rows() if row_label(row) == second_label)
+                next(w for w in widgets(draft_row) if isinstance(w, v.TextField) and w.label == "x").v_model = "7"
                 recommendation_row = rows()[1]
                 next(w for w in widgets(recommendation_row) if isinstance(w, v.Btn) and "Delete" in w.children).fire_event("click", {})
                 expected = ["Run 1", "Batch 1, recommendation 1", "Run 2", new_candidate, second_label, "Run 3", "Run 4"]
                 self.assertEqual(labels(), expected)
-                draft_row = next(row for row in rows() if row.children[0].children[0] == second_label)
-                self.assertEqual(next(w for w in widgets(draft_row) if isinstance(w, v.TextField) and w.label == f"x for {second_label}").v_model, "7")
+                draft_row = next(row for row in rows() if row_label(row) == second_label)
+                self.assertEqual(next(w for w in widgets(draft_row) if isinstance(w, v.TextField) and w.label == "x").v_model, "7")
                 next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
                 last_draft = self.state["project"].value["draft_runs"][-1]
                 self.assertEqual(labels(), [*expected, f"New run {last_draft['id'][:8]}"])
@@ -163,18 +245,18 @@ class ResultsTableTests(unittest.TestCase):
                 return [w for w in widgets(tables[0]) if getattr(w, "tag", None) == "tr"][1:]
 
             def row(label):
-                return next(r for r in rows() if label in r.children[0].children)
+                return next(r for r in rows() if row_label(r) == label)
 
             def save(label, value):
                 current = row(label)
-                field = next(w for w in widgets(current) if isinstance(w, v.TextField) and w.label == f"Result for {label}")
+                field = next(w for w in widgets(current) if isinstance(w, v.TextField) and w.label == "score")
                 field.v_model = value
                 current = row(label)
                 next(w for w in widgets(current) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
 
             candidate = "Batch 1, recommendation 1"
             self.assertEqual(len(rows()), 3)
-            self.assertEqual(next(w for w in widgets(row(candidate)) if isinstance(w, v.TextField) and w.label == f"Result for {candidate}").v_model, "")
+            self.assertEqual(next(w for w in widgets(row(candidate)) if isinstance(w, v.TextField) and w.label == "score").v_model, "")
             save(candidate, "invalid")
             self.assertEqual(len(self.state["project"].value["runs"]), 1)
             self.assertEqual(self.state["message_kind"].value, "error")
@@ -216,14 +298,14 @@ class ResultsTableTests(unittest.TestCase):
         root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
         try:
             def row(label):
-                return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+                return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
 
             def best(label):
                 fields = {}
                 for cell in row(label).children:
                     inputs = [w for w in widgets(cell) if isinstance(w, v.TextField)]
                     if inputs and any(getattr(w, "tag", None) == "span" and "Best observed" in w.children for w in widgets(cell)):
-                        fields[inputs[0].label.split(" result for ")[0]] = True
+                        fields[inputs[0].label] = True
                 return set(fields)
 
             linked = "Batch 1, recommendation 1"
@@ -234,7 +316,7 @@ class ResultsTableTests(unittest.TestCase):
             self.assertEqual(best("Run 1"), set())
             self.assertEqual(best(pending), set())
 
-            field = next(w for w in widgets(row("Run 3")) if isinstance(w, v.TextField) and w.label == "score result for Run 3")
+            field = next(w for w in widgets(row("Run 3")) if isinstance(w, v.TextField) and w.label == "score")
             field.v_model = "50"
             self.assertEqual(best("Run 3"), set())
             self.assertEqual(best(linked), {"score"})
@@ -263,18 +345,18 @@ class ResultsTableTests(unittest.TestCase):
             def row(label):
                 return next(
                     w for w in widgets(root) if getattr(w, "tag", None) == "tr"
-                    and w.children and label in getattr(w.children[0], "children", ())
+                    and w.children and row_label(w) == label
                 )
 
             first = "Batch 1, recommendation 1"
             second = "Batch 1, recommendation 2"
-            next(w for w in widgets(row(second)) if isinstance(w, v.TextField) and w.label == f"Result for {second}").v_model = "9"
+            next(w for w in widgets(row(second)) if isinstance(w, v.TextField) and w.label == "score").v_model = "9"
             next(w for w in widgets(row(first)) if isinstance(w, v.Btn) and "Delete" in w.children).fire_event("click", {})
             project = self.state["project"].value
             self.assertEqual(project["recommendation_batches"][0]["candidates"], [{"parameters": {"x": 7}}])
             self.assertEqual(project["runs"], [{"id": 1, "parameters": {"x": 1}, "objective": 2}])
-            self.assertEqual(next(w for w in widgets(row(first)) if isinstance(w, v.TextField) and w.label == f"x for {first}").v_model, "7")
-            self.assertEqual(next(w for w in widgets(row(first)) if isinstance(w, v.TextField) and w.label == f"Result for {first}").v_model, "9")
+            self.assertEqual(next(w for w in widgets(row(first)) if isinstance(w, v.TextField) and w.label == "x").v_model, "7")
+            self.assertEqual(next(w for w in widgets(row(first)) if isinstance(w, v.TextField) and w.label == "score").v_model, "9")
             next(w for w in widgets(row(first)) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
             project = self.state["project"].value
             self.assertEqual(project["runs"][-1]["parameters"], {"x": 7})
@@ -288,7 +370,7 @@ class ResultsTableTests(unittest.TestCase):
             with patch.object(self.services.optimizer, "generate", return_value=[{"parameters": {"x": 5}}]):
                 next(b for b in context.find(v.Btn).widgets if "Generate batch" in b.children).fire_event("click", {})
             self.assertEqual(
-                next(w for w in widgets(row("Batch 2, recommendation 1")) if isinstance(w, v.TextField) and w.label == "x for Batch 2, recommendation 1").v_model,
+                next(w for w in widgets(row("Batch 2, recommendation 1")) if isinstance(w, v.TextField) and w.label == "x").v_model,
                 "5",
             )
         finally:
@@ -302,7 +384,7 @@ class ResultsTableTests(unittest.TestCase):
             label = "Batch 1, recommendation 1"
             row = next(
                 w for w in widgets(root) if getattr(w, "tag", None) == "tr"
-                and w.children and label in getattr(w.children[0], "children", ())
+                and w.children and row_label(w) == label
             )
             self.assertEqual(
                 [w.children for w in widgets(row) if isinstance(w, v.Btn) and any(str(c).startswith("Delete") for c in w.children)],
@@ -321,7 +403,7 @@ class ResultsTableTests(unittest.TestCase):
         try:
             row = next(
                 w for w in widgets(root) if getattr(w, "tag", None) == "tr"
-                and w.children and "Run 1" in getattr(w.children[0], "children", ())
+                and w.children and row_label(w) == "Run 1"
             )
             next(w for w in widgets(row) if isinstance(w, v.Btn) and "Delete" in w.children).fire_event("click", {})
             project = self.state["project"].value
@@ -345,18 +427,14 @@ class ResultsTableTests(unittest.TestCase):
             self.assertEqual(len(project["runs"]), 1)
             self.assertEqual(len(project["recommendation_batches"]), 2)
             self.assertEqual(len([w for w in widgets(root) if getattr(w, "tag", None) == "table"]), 1)
-            self.assertTrue(any(
-                w.label == "Result for Batch 2, recommendation 1" and w.v_model == ""
-                for w in context.find(v.TextField).widgets
-            ))
             self.assertIn("Predictions are unavailable", self.state["message"].value)
             rows = [w for w in widgets(root) if getattr(w, "tag", None) == "tr"]
-            row = next(r for r in rows if r.children and "Batch 2, recommendation 1" in getattr(r.children[0], "children", ()))
-            self.assertIn("2.5", [str(c.children[0]) for c in row.children if getattr(c, "tag", None) == "td" and c.children and isinstance(c.children[0], str)])
-            self.assertIn("0.3", [str(c.children[0]) for c in row.children if getattr(c, "tag", None) == "td" and c.children and isinstance(c.children[0], str)])
-            field = next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x for Batch 2, recommendation 1")
+            row = next(r for r in rows if r.children and row_label(r) == "Batch 2, recommendation 1")
+            self.assertEqual(next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "score").v_model, "")
+            self.assertIn("2.5 ± 0.3", [str(c.children[0]) for c in row.children if getattr(c, "tag", None) == "td" and c.children and isinstance(c.children[0], str)])
+            field = next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x")
             field.v_model = "4.0"
-            row = next(r for r in widgets(root) if getattr(r, "tag", None) == "tr" and r.children and "Batch 2, recommendation 1" in getattr(r.children[0], "children", ()))
+            row = next(r for r in widgets(root) if getattr(r, "tag", None) == "tr" and r.children and row_label(r) == "Batch 2, recommendation 1")
             next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
             wait_for(lambda: self.state["project"].value["recommendation_batches"][1]["candidates"][0].get("prediction_status") == "model_unavailable")
         finally:
@@ -375,10 +453,11 @@ class ResultsTableTests(unittest.TestCase):
                 next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
                 draft_id = self.state["project"].value["draft_runs"][0]["id"]
                 label = f"New run {draft_id[:8]}"
-                for field_label, value in ((f"x for {label}", "8"), (f"Result for {label}", "9")):
-                    field = next(w for w in context.find(v.TextField).widgets if w.label == field_label)
+                row = next(w for w in widgets(context.container) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
+                for field_label, value in (("x", "8"), ("score", "9")):
+                    field = next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == field_label)
                     field.v_model = value
-                row = next(w for w in widgets(context.container) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+                row = next(w for w in widgets(context.container) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
                 next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 self.assertEqual(self.state["project"].value["runs"][-1]["objective"], 9)
 
@@ -403,17 +482,17 @@ class ResultsTableTests(unittest.TestCase):
             try:
                 label = "Batch 1, recommendation 1"
                 def row():
-                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
                 def text_cells():
                     return [c.children[0] for c in row().children if getattr(c, "tag", None) == "td" and c.children and isinstance(c.children[0], str)]
 
-                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == f"x for {label}").v_model = "6"
-                wait_for(lambda: "6" in text_cells() and "0.1" in text_cells())
+                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == "x").v_model = "6"
+                wait_for(lambda: "6 ± 0.1" in text_cells())
                 candidate = self.state["project"].value["recommendation_batches"][0]["candidates"][0]
                 self.assertEqual(candidate["parameters"], {"x": 3})
                 self.assertEqual(candidate["predictions"]["score"]["mean"], 2)
 
-                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == f"Result for {label}").v_model = "8"
+                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == "score").v_model = "8"
                 next(w for w in widgets(row()) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 wait_for(lambda: self.state["project"].value["recommendation_batches"][0]["candidates"][0].get("predictions", {}).get("score", {}).get("sigma") == 0.2)
                 project = self.state["project"].value
@@ -427,6 +506,131 @@ class ResultsTableTests(unittest.TestCase):
             finally:
                 context.close()
 
+    def test_manual_draft_prediction_is_saved_refreshed_and_restored(self):
+        project = self.state["project"].value
+        upgrade_project(project)
+        project["objectives"].append({"name": "cost", "direction": "minimize"})
+
+        def predict(current, point):
+            return {
+                "score": {"mean": float(point["x"]), "sigma": 0.25},
+                "cost": {"mean": 12, "sigma": 2},
+            }
+
+        with patch.object(self.services.optimizer, "predict", side_effect=predict):
+            root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+            try:
+                next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
+                draft_id = self.state["project"].value["draft_runs"][0]["id"]
+                label = f"New run {draft_id[:8]}"
+                def row():
+                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                                and w.children and row_label(w) == label)
+                def text_cells():
+                    return [c.children[0] for c in row().children if c.children and isinstance(c.children[0], str)]
+                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == "x").v_model = "4"
+                next(w for w in widgets(row()) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+                wait_for(lambda: "4 ± 0.25" in text_cells() and "12 ± 2" in text_cells())
+                self.assertEqual(len(self.state["project"].value["runs"]), 1)
+                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == "x").v_model = "6"
+                self.assertIn("Save to update", text_cells())
+                next(w for w in widgets(row()) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+                wait_for(lambda: "6 ± 0.25" in text_cells())
+                restored = self.services.files.load_json(json.dumps(self.state["project"].value).encode())
+            finally:
+                context.close()
+
+            self.state["project"].value = restored
+            root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+            try:
+                self.assertIn("6 ± 0.25", text_cells())
+                self.assertIn("12 ± 2", text_cells())
+            finally:
+                context.close()
+
+    def test_converted_draft_resumes_interrupted_prediction(self):
+        started = threading.Event()
+        release = threading.Event()
+        calls = []
+
+        def predict(project, point):
+            calls.append(dict(point))
+            if len(calls) == 1:
+                started.set()
+                if not release.wait(5):
+                    raise RuntimeError("Prediction test timed out.")
+            return {"score": {"mean": 7, "sigma": 0.4}}
+
+        with patch.object(self.services.optimizer, "predict", side_effect=predict):
+            root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+            try:
+                next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
+                draft = self.state["project"].value["draft_runs"][0]
+                label = f"New run {draft['id'][:8]}"
+                row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                           and w.children and row_label(w) == label)
+                next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x").v_model = "4"
+                next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "score").v_model = "8"
+                next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+                self.assertTrue(started.wait(5))
+                self.assertEqual(self.state["project"].value["runs"][-1]["prediction_status"], "refresh_required")
+                restored = self.services.files.load_json(json.dumps(self.state["project"].value).encode())
+                context.close()
+                self.state["project"].value = restored
+                root, reopened = solara.render(RunsView(self.state, self.services), handle_error=False)
+                try:
+                    wait_for(lambda: self.state["project"].value["runs"][-1].get("predictions", {}).get("score", {}).get("mean") == 7)
+                    row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                               and w.children and row_label(w) == "Run 2")
+                    self.assertIn("7 ± 0.4", [c.children[0] for c in row.children if c.children and isinstance(c.children[0], str)])
+                finally:
+                    reopened.close()
+            finally:
+                release.set()
+                context.close()
+
+    def test_manual_draft_prediction_with_real_ax_model(self):
+        project = self.state["project"].value
+        project["runs"] = [
+            {"id": 1, "parameters": {"x": 1}, "objective": 1},
+            {"id": 2, "parameters": {"x": 5}, "objective": 5},
+            {"id": 3, "parameters": {"x": 9}, "objective": 10},
+        ]
+        with patch.object(self.services.optimizer, "predict", wraps=AppServices().optimizer.predict):
+            root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+            try:
+                next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
+                draft = self.state["project"].value["draft_runs"][0]
+                label = f"New run {draft['id'][:8]}"
+                row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                           and w.children and row_label(w) == label)
+                next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x").v_model = "6"
+                next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+                wait_for(lambda: "predictions" in self.state["project"].value["draft_runs"][0], timeout=30)
+                prediction = self.state["project"].value["draft_runs"][0]["predictions"]["score"]
+                self.assertGreaterEqual(prediction["sigma"], 0)
+                self.assertIn(f"{prediction['mean']:.6g} ± {prediction['sigma']:.6g}",
+                              [c.children[0] for c in row.children if c.children and isinstance(c.children[0], str)])
+            finally:
+                context.close()
+
+    def test_manual_draft_without_observations_reports_unavailable(self):
+        self.state["project"].value["runs"] = []
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+        try:
+            next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
+            draft = self.state["project"].value["draft_runs"][0]
+            label = f"New run {draft['id'][:8]}"
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                       and w.children and row_label(w) == label)
+            next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x").v_model = "4"
+            next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+            wait_for(lambda: self.state["project"].value["draft_runs"][0].get("prediction_status") == "model_unavailable")
+            self.assertEqual(self.state["message_kind"].value, "warning")
+            self.assertIn("at least one observed result", self.state["message"].value)
+        finally:
+            context.close()
+
     def test_edit_and_save_with_real_ax_model(self):
         project = self.state["project"].value
         project["runs"] = [
@@ -439,12 +643,12 @@ class ResultsTableTests(unittest.TestCase):
             try:
                 label = "Batch 1, recommendation 1"
                 def row():
-                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
-                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == f"x for {label}").v_model = "6"
+                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
+                next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == "x").v_model = "6"
                 def predicted_mean():
                     cell = row().children[3]
                     try:
-                        return float(cell.children[0])
+                        return float(cell.children[0].split(" ± ")[0])
                     except (ValueError, TypeError):
                         return None
                 wait_for(lambda: predicted_mean() is not None, timeout=30)
@@ -473,16 +677,16 @@ class ResultsTableTests(unittest.TestCase):
             try:
                 label = "Batch 1, recommendation 1"
                 def row():
-                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
                 def values():
                     return [c.children[0] for c in row().children if getattr(c, "tag", None) == "td" and c.children and isinstance(c.children[0], str)]
-                field = next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == f"x for {label}")
+                field = next(w for w in widgets(row()) if isinstance(w, v.TextField) and w.label == "x")
                 field.v_model = "4"
                 self.assertTrue(started.wait(5))
                 field.v_model = "5"
                 release.set()
-                wait_for(lambda: "5" in values() and "0.5" in values())
-                self.assertNotIn("4", values())
+                wait_for(lambda: "5 ± 0.5" in values())
+                self.assertNotIn("4 ± 0.5", values())
             finally:
                 release.set()
                 context.close()
@@ -492,9 +696,10 @@ class ResultsTableTests(unittest.TestCase):
             _, context = solara.render(RunsView(self.state, self.services), handle_error=False)
             try:
                 label = "Batch 1, recommendation 1"
-                field = next(w for w in context.find(v.TextField).widgets if w.label == f"Result for {label}")
+                row = next(w for w in widgets(context.container) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
+                field = next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "score")
                 field.v_model = "9"
-                row = next(w for w in widgets(context.container) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+                row = next(w for w in widgets(context.container) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
                 next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 wait_for(lambda: "Prediction unavailable" in self.state["message"].value)
                 project = self.state["project"].value
@@ -510,7 +715,8 @@ class ResultsTableTests(unittest.TestCase):
         calls = []
 
         def predict(project, point):
-            calls.append(project["runs"][0]["objective"])
+            if point["x"] == 3:
+                calls.append(project["runs"][0]["objective"])
             if len(calls) == 1:
                 started.set()
                 if not release.wait(5):
@@ -521,11 +727,11 @@ class ResultsTableTests(unittest.TestCase):
             root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
             try:
                 def row(label):
-                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
                 label = "Batch 1, recommendation 1"
                 next(w for w in widgets(row(label)) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 self.assertTrue(started.wait(5))
-                next(w for w in widgets(row("Run 1")) if isinstance(w, v.TextField) and w.label == "Result for Run 1").v_model = "7"
+                next(w for w in widgets(row("Run 1")) if isinstance(w, v.TextField) and w.label == "score").v_model = "7"
                 next(w for w in widgets(row("Run 1")) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 release.set()
                 wait_for(lambda: self.state["project"].value["recommendation_batches"][0]["candidates"][0].get("predictions", {}).get("score", {}).get("mean") == 7)
@@ -550,7 +756,7 @@ class ResultsTableTests(unittest.TestCase):
         with patch.object(self.services.optimizer, "predict", side_effect=predict):
             root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
             label = "Batch 1, recommendation 1"
-            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
             next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
             try:
                 self.assertTrue(started.wait(5))
@@ -578,7 +784,7 @@ class ResultsTableTests(unittest.TestCase):
             root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
             try:
                 label = "Batch 1, recommendation 1"
-                row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+                row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
                 next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 self.assertTrue(started.wait(5))
                 next(w for w in widgets(row) if isinstance(w, v.Btn) and "Delete" in w.children).fire_event("click", {})
@@ -610,11 +816,11 @@ class ResultsTableTests(unittest.TestCase):
                 row = next(
                     w for w in widgets(root)
                     if getattr(w, "tag", None) == "tr"
-                    and w.children and label in getattr(w.children[0], "children", ())
+                    and w.children and row_label(w) == label
                 )
-                next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == f"x for {label}").v_model = parameter
+                next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x").v_model = parameter
                 if result is not None:
-                    next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == f"Result for {label}").v_model = result
+                    next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "score").v_model = result
                 next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
 
             label = "Batch 1, recommendation 1"
@@ -644,18 +850,19 @@ class ResultsTableTests(unittest.TestCase):
             next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
             draft = self.state["project"].value["draft_runs"][0]
             label = f"New run {draft['id'][:8]}"
-            field = next(w for w in context.find(v.TextField).widgets if w.label == f"x for {label}")
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
+            field = next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x")
             self.assertEqual(field.v_model, "")
             self.assertEqual(len(self.state["project"].value["runs"]), 1)
             field.v_model = "8"
-            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
             next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
             project = self.state["project"].value
             self.assertEqual(project["draft_runs"][0]["parameters"], {"x": 8})
             self.assertEqual(len(project["runs"]), 1)
             self.assertEqual(self.services.files.load_json(json.dumps(project).encode()), project)
-            next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == f"Result for {label}").v_model = "5"
-            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+            next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "score").v_model = "5"
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
             next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
             project = self.state["project"].value
             self.assertEqual(project["draft_runs"], [])
@@ -673,7 +880,7 @@ class ResultsTableTests(unittest.TestCase):
             drafts = self.state["project"].value["draft_runs"]
             self.assertEqual(len(drafts), 2)
             label = f"New run {drafts[0]['id'][:8]}"
-            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and label in getattr(w.children[0], "children", ()))
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == label)
             next(w for w in widgets(row) if isinstance(w, v.Btn) and "Delete" in w.children).fire_event("click", {})
             self.assertEqual(self.state["project"].value["draft_runs"], [drafts[1]])
             self.assertEqual(len(self.state["project"].value["runs"]), 1)

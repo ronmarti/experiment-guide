@@ -11,7 +11,7 @@ from experiment.services.optimization import AxOptimizer
 from gui.configuration import ParameterConfiguration
 from gui.runs_view import RunsView
 from gui.services import AppServices
-from test_results_table import widgets
+from test_results_table import row_label, widgets
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -163,11 +163,11 @@ class ConfigurationTests(unittest.TestCase):
         root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
         try:
             labels = [field.label for field in context.find(v.TextField).widgets]
-            self.assertIn("score result for Batch 1, recommendation 1", labels)
-            self.assertIn("cost result for Batch 1, recommendation 1", labels)
-            field = next(w for w in context.find(v.TextField).widgets if w.label == "cost result for Batch 1, recommendation 1")
+            self.assertIn("score", labels)
+            self.assertIn("cost", labels)
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and row_label(w) == "Batch 1, recommendation 1")
+            field = next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "cost")
             field.v_model = "4"
-            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr" and w.children and "Batch 1, recommendation 1" in getattr(w.children[0], "children", ()))
             next(b for b in widgets(row) if isinstance(b, v.Btn) and "Save" in b.children).fire_event("click", {})
             self.assertEqual(self.state["project"].value["runs"][0]["results"], {"score": 3, "cost": 4})
         finally:

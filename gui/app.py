@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import reacton.ipyvuetify as v
 import solara
 
 from gui.project_selection import ProjectSelection
@@ -16,9 +17,13 @@ from gui.startup import Startup
 def Page():
     state = session_state()
     services = solara.use_memo(AppServices, dependencies=[])
-    if not state["authorized"].value:
-        Startup(state)
-    elif state["project"].value is None:
-        ProjectSelection(state, services)
-    else:
-        ProjectView(state, services)
+    with v.Html(
+        tag="section",
+        style_="width: 100%; max-width: 1600px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 40px); box-sizing: border-box; min-width: 0",
+    ):
+        if not state["authorized"].value:
+            Startup(state)
+        elif state["project"].value is None:
+            ProjectSelection(state, services)
+        else:
+            ProjectView(state, services)

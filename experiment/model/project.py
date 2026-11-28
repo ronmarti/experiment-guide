@@ -10,6 +10,12 @@ def iter_candidates(project: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield from batch["candidates"]
 
 
+def iter_prediction_rows(project: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    yield from project["runs"]
+    yield from project.get("draft_runs", [])
+    yield from iter_candidates(project)
+
+
 def blank_project(name: str = "Untitled experiment") -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,

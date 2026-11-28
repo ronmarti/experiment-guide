@@ -46,6 +46,8 @@ GPU execution, and AWS-specific services are outside the MVP.
 A project contains its parameter definitions, objective definitions, experiment
 runs, and generated recommendation batches. The app holds the active project
 only for the current session; the service is not a durable project store.
+The project JSON upload remains available while a project is open. A valid
+upload replaces the current project; an invalid upload leaves it unchanged.
 
 ### 4.1 Parameters and objective
 
@@ -67,6 +69,10 @@ only for the current session; the service is not a durable project store.
 - Users can add a blank run row and enter its parameter values and objective
   directly in the table. Parameter values are also editable for existing runs
   and recommendations.
+- The Run and notes column is editable for every row. Row saves retain its
+  text through draft conversion and project export and import.
+- Parameter and objective columns are visually separated, and editable value
+  fields are labeled with their parameter or objective name.
 - New runs, imported runs, and recommendations are appended in insertion
   order. Saving a blank run keeps its position; project export and import
   preserve the table order.
@@ -107,10 +113,11 @@ only for the current session; the service is not a durable project store.
 - The app displays and retains generated parameterizations in the project.
   Users perform the experiments externally and fill in their observed results
   in the shared table, or import results from CSV.
-- Show each objective's predicted mean and sigma (posterior standard deviation
-  of the expected outcome) separately from observed results. Recalculate a
+- Show each objective's predicted mean and sigma together as mean ± sigma
+  (sigma is the posterior standard deviation of the expected outcome),
+  separately from observed results. Recalculate a
   preview when recommendation parameters are edited, using saved observations.
-  Saving the row refreshes and persists its predictions using the newly saved
+  Saving any row, including a manual run or draft, refreshes and persists its predictions using the newly saved
   observations. An invalid or incomplete parameterization, missing observations,
   or an unmodeled objective has no prediction. Report model failures without
   discarding successfully saved row data.

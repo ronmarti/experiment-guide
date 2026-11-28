@@ -74,28 +74,46 @@ def RunsView(state, services):
             best_results[name] = (max if objective["direction"] == "maximize" else min)(values)
     rows = ordered_table_rows(project)
     solara.Markdown("## Runs and recommendations")
+    solara.Markdown(
+        "Edit run notes, parameter values and results in the table, then select Save for each row. "
+        "Available objective results are used without filling in missing results. Save edits before leaving this screen. "
+        "Predicted means and sigmas are model estimates, not observed results. "
+        "Sigma is the posterior standard deviation of the expected outcome. Predictions update as you edit "
+        "recommendation parameters and when you save any row; previews use saved observations and are not saved until you save the row. "
+        "Wait for updating to finish before downloading; interrupted saved refreshes resume when this tab is reopened. "
+        "Predictions are unavailable without observations, for incomplete parameters, or for objectives not modeled yet. "
+        "Best observed values are highlighted for each objective, including ties; unsaved edits are not ranked. "
+        "Deleting a recommendation also deletes its linked run, if any."
+    )
+    
     if rows:
         with v.Html(tag="div", style_="overflow-x: auto"):
             with v.Html(tag="table", style_="width: 100%; border-collapse: collapse"):
                 with v.Html(tag="thead"):
                     with v.Html(tag="tr"):
-                        for heading in ["Run / recommendation", *[p["name"] for p in project["parameters"]],
-                                        *[heading for o in objectives for heading in (
-                                            f"{o['name']} observed", f"{o['name']} predicted mean",
-                                            f"{o['name']} predicted sigma",
-                                        )], "Actions"]:
-                            v.Html(tag="th", children=[heading], style_="text-align: left; padding: 8px")
+                        headings = ["Run and notes", *[p["name"] for p in project["parameters"]]]
+                        headings += [heading for o in objectives for heading in (
+                            f"{o['name']} observed", f"{o['name']} predicted mean ± sigma",
+                        )]
+                        headings.append("Actions")
+                        for index, heading in enumerate(headings):
+                            style = "text-align: left; padding: 8px"
+                            if objectives and index == 1 + len(project["parameters"]):
+                                style += "; border-left: 3px solid #546e7a"
+                            v.Html(tag="th", children=[heading], style_=style)
                 with v.Html(tag="tbody"):
                     for kind, row, batch_index, candidate_index in rows:
                         if kind == "run":
                             ResultRow(
                                 state, services, row["parameters"], f"Run {row['id']}",
                                 results_for(project, row), run_id=row["id"], best_results=best_results,
+                                saved_notes=row.get("notes"), saved_row=row,
                             ).key(f"run-{row['id']}")
                         elif kind == "draft":
                             ResultRow(
                                 state, services, row["parameters"], f"New run {row['id'][:8]}",
-                                {}, draft_id=row["id"], best_results=best_results,
+                                {}, draft_id=row["id"], best_results=best_results, saved_notes=row.get("notes"),
+                                saved_row=row,
                             ).key(f"draft-{row['id']}")
                         else:
                             assert batch_index is not None and candidate_index is not None
@@ -106,7 +124,7 @@ def RunsView(state, services):
                                 state, services, row["parameters"], label,
                                 results_for(project, run) if run else {}, run_id=run_id,
                                 batch_index=batch_index, candidate_index=candidate_index,
-                                candidate=row, best_results=best_results,
+                                candidate=row, best_results=best_results, saved_notes=row.get("notes"), saved_row=row,
                                 on_delete_recommendation=lambda batch_index=batch_index, candidate_index=candidate_index: (
                                     remove_recommendation(batch_index, candidate_index)
                                 ),
@@ -120,17 +138,7 @@ def RunsView(state, services):
     if waiting.value:
         solara.ProgressLinear()
 
-    solara.Markdown(
-        "Edit parameter values and results in the table, then select Save for each row. "
-        "Available objective results are used without filling in missing results. Save edits before leaving this screen. "
-        "Predicted means and sigmas are model estimates, not observed results. "
-        "Sigma is the posterior standard deviation of the expected outcome. Predictions update as you edit "
-        "recommendation parameters and when you save; previews use saved observations and are not saved until you save the row. "
-        "Wait for updating to finish before downloading; interrupted saved refreshes resume when this tab is reopened. "
-        "Predictions are unavailable without observations, for manual runs, or for objectives not modeled yet. "
-        "Best observed values are highlighted for each objective, including ties; unsaved edits are not ranked. "
-        "Deleting a recommendation also deletes its linked run, if any."
-    )
+    
     if not project["parameters"] or not objectives:
         solara.Warning("Configure at least one parameter and an objective first.")
     else:

@@ -1,6 +1,6 @@
 from typing import Any
 
-from experiment.model.project import iter_candidates, objectives_for
+from experiment.model.project import iter_candidates, iter_prediction_rows, objectives_for
 from experiment.services.values import validate_parameters, validate_results, validate_run
 
 
@@ -12,11 +12,11 @@ def set_candidate_parameters(candidate: dict[str, Any], parameters: dict[str, An
 
 
 def invalidate_predictions(project: dict[str, Any]) -> None:
-    for candidate in iter_candidates(project):
-        if "predictions" not in candidate:
+    for row in iter_prediction_rows(project):
+        if "predictions" not in row:
             continue
-        del candidate["predictions"]
-        candidate["prediction_status"] = "configuration_changed"
+        del row["predictions"]
+        row["prediction_status"] = "configuration_changed"
 
 
 class RunService:
@@ -43,8 +43,9 @@ class RunService:
         self, project: dict[str, Any], value: str | dict[str, Any], *, run_id: int | None = None,
         batch_index: int | None = None, candidate_index: int | None = None,
         draft_id: str | None = None, parameters: dict[str, Any] | None = None,
-    ) -> None:
-        """Save edited parameters and results to a run, draft, or recommendation."""
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Save edits and return the resulting visible row."""
         candidate, draft, run = self._find_row(project, run_id, batch_index, candidate_index, draft_id)
         current = candidate or draft or run
         assert current is not None
@@ -69,14 +70,24 @@ class RunService:
             assert isinstance(value, str)
             results = validate_results(project, {project["objective"]["name"]: value})
 
+        if notes is not None and not isinstance(notes, str):
+            raise ValueError("Run and notes must be a string.")
+        if not multi and run is not None and not results:
+            raise ValueError("Enter at least one objective result.")
+        if notes is not None:
+            current["notes"] = notes
+
         # A row without observations remains a draft or pending recommendation.
         if run is None and not results:
             if candidate is not None:
                 set_candidate_parameters(candidate, saved_parameters)
-                return
+                return candidate
             assert draft is not None
+            if draft["parameters"] != saved_parameters and "predictions" in draft:
+                draft.pop("predictions")
+                draft["prediction_status"] = "parameters_changed"
             draft["parameters"] = saved_parameters
-            return
+            return draft
 
         if run is None:
             run = self._create_run(project, saved_parameters, results, value)
@@ -85,19 +96,25 @@ class RunService:
                 # Replacing a draft with a run must not move its table row.
                 if "table_order" in draft:
                     run["table_order"] = draft["table_order"]
+                if "notes" in draft:
+                    run["notes"] = draft["notes"]
                 project["draft_runs"] = [item for item in project["draft_runs"] if item["id"] != draft_id]
             else:
                 candidate["run_id"] = run["id"]
         else:
+            if candidate is None and run["parameters"] != saved_parameters and "predictions" in run:
+                run.pop("predictions")
+                run["prediction_status"] = "parameters_changed"
             self._update_run(project, run, saved_parameters, results)
 
         if candidate is not None:
             set_candidate_parameters(candidate, saved_parameters)
-            return
+            return candidate
         # Editing a linked run must also update its recommendation's parameter snapshot.
         for linked in iter_candidates(project):
             if linked.get("run_id") == run["id"]:
                 set_candidate_parameters(linked, dict(saved_parameters))
+        return run
 
     def _create_run(
         self, project: dict[str, Any], parameters: dict[str, Any],

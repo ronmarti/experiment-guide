@@ -2,7 +2,7 @@ import re
 from copy import deepcopy
 from typing import Any, Literal
 
-from experiment.model.project import iter_candidates, upgrade_project
+from experiment.model.project import iter_candidates, iter_prediction_rows, upgrade_project
 from experiment.services.runs import invalidate_predictions
 from experiment.services.constraints import validate_constraints
 from experiment.services.validation import ProjectValidator
@@ -20,8 +20,8 @@ def _rename_values(project: dict[str, Any], field: str, old: str, new: str) -> N
         targets += [draft["parameters"] for draft in project.get("draft_runs", [])]
     elif field == "results":
         targets += [
-            candidate["predictions"]
-            for candidate in iter_candidates(project) if "predictions" in candidate
+            row["predictions"]
+            for row in iter_prediction_rows(project) if "predictions" in row
         ]
     for values in targets:
         if old not in values:
@@ -96,6 +96,6 @@ class ConfigurationService:
         if kind == "parameter":
             invalidate_predictions(updated)
         elif kind == "objective":
-            for candidate in iter_candidates(updated):
-                candidate.get("predictions", {}).pop(removed["name"], None)
+            for row in iter_prediction_rows(updated):
+                row.get("predictions", {}).pop(removed["name"], None)
         return updated

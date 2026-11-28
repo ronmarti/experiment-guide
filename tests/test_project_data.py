@@ -25,6 +25,33 @@ class ProjectDataTests(unittest.TestCase):
         self.assertEqual(project["runs"][-1]["table_order"], 5)
         self.assertEqual(self.services.files.load_json(json.dumps(project).encode()), project)
 
+    def test_legacy_notes_survive_draft_and_recommendation_saves(self):
+        project = self.project
+        project["draft_runs"] = [{"id": "draft", "parameters": {"x": 8}}]
+        self.services.runs.save(project, "", draft_id="draft", notes="Draft notes")
+        self.services.runs.save(project, "9", draft_id="draft")
+        self.assertEqual(project["runs"][-1]["notes"], "Draft notes")
+        self.services.runs.save(project, "", batch_index=0, candidate_index=0, notes="Candidate notes")
+        self.services.runs.save(project, "4", batch_index=0, candidate_index=0)
+        self.assertEqual(project["recommendation_batches"][0]["candidates"][0]["notes"], "Candidate notes")
+        self.assertEqual(self.services.files.load_json(json.dumps(project).encode()), project)
+
+    def test_import_rejects_non_string_notes(self):
+        project = self.project
+        project["draft_runs"] = [{"id": "draft", "parameters": {}}]
+        for row in (project["runs"][0], project["recommendation_batches"][0]["candidates"][0],
+                    project["draft_runs"][0]):
+            row["notes"] = 123
+            with self.assertRaisesRegex(ValueError, "notes must be a string"):
+                self.services.files.load_json(json.dumps(project).encode())
+            del row["notes"]
+
+    def test_invalid_result_does_not_save_notes(self):
+        project = self.project
+        with self.assertRaises(ValueError):
+            self.services.runs.save(project, "", run_id=1, notes="unsaved")
+        self.assertNotIn("notes", project["runs"][0])
+
     def test_import_rejects_invalid_or_duplicate_table_orders(self):
         project = self.project
         candidate = project["recommendation_batches"][0]["candidates"][0]
@@ -56,6 +83,19 @@ class ProjectDataTests(unittest.TestCase):
             candidate["predictions"] = predictions
             with self.subTest(predictions=predictions), self.assertRaisesRegex(ValueError, "predictions"):
                 self.services.files.load_json(json.dumps(project).encode())
+
+    def test_import_rejects_invalid_manual_predictions(self):
+        project = self.project
+        project["draft_runs"] = [{"id": "draft", "parameters": {}}]
+        for row in (project["runs"][0], project["draft_runs"][0]):
+            row["predictions"] = {"score": {"mean": 1, "sigma": -1}}
+            with self.assertRaisesRegex(ValueError, "predictions"):
+                self.services.files.load_json(json.dumps(project).encode())
+            del row["predictions"]
+            row["prediction_status"] = "invalid"
+            with self.assertRaisesRegex(ValueError, "prediction status"):
+                self.services.files.load_json(json.dumps(project).encode())
+            del row["prediction_status"]
 
     def test_import_rejects_invalid_candidate_links(self):
         project = self.project

@@ -11,7 +11,7 @@ from experiment.model.project import objectives_for
 def ResultRow(
     state, services, parameters, label, results, run_id=None,
     batch_index=None, candidate_index=None, draft_id=None, candidate=None,
-    on_delete_recommendation=None, best_results=None,
+    on_delete_recommendation=None, best_results=None, saved_notes=None, saved_row=None,
 ):
     objectives = objectives_for(state["project"].value)
     values = solara.use_reactive({name: str(value) for name, value in results.items()})
@@ -19,13 +19,15 @@ def ResultRow(
         name: str(parameter_value) for name, parameter_value in parameters.items()
     })
     prediction_request = solara.use_reactive(None)
+    edited_notes = solara.use_reactive(None)
+    parameters_dirty = solara.use_reactive(False)
 
     def request_prediction(project, point, persist):
         prediction_request.value = services.predictions.request(project, point, persist)
 
     # A saved refresh may be interrupted when leaving the view; resume it on mount.
     def resume_prediction():
-        if candidate is not None and candidate.get("prediction_status") == "refresh_required":
+        if saved_row is not None and saved_row.get("prediction_status") == "refresh_required":
             request_prediction(state["project"].value, parameters, True)
 
     solara.use_effect(resume_prediction, dependencies=[])
@@ -53,7 +55,9 @@ def ResultRow(
                 state["message_kind"].value = "warning"
                 state["message"].value = f"{label} saved. Prediction unavailable: {result['error']}"
             return
-        updated = services.predictions.apply(current, request, result, batch_index, candidate_index)
+        updated = services.predictions.apply(
+            current, request, result, batch_index, candidate_index, run_id=run_id, draft_id=draft_id,
+        )
         if updated is None:
             return
         if state["message"].value == f"{label} saved. Updating predictions...":
@@ -70,27 +74,29 @@ def ResultRow(
     def update_parameter(name, value):
         updated_values = {**parameter_values.value, name: value or ""}
         parameter_values.value = updated_values
+        parameters_dirty.value = True
         if candidate is not None:
             request_prediction(state["project"].value, updated_values, False)
 
     def save():
         try:
             project = deepcopy(state["project"].value)
-            services.runs.save(
+            saved = services.runs.save(
                 project, values.value if "objectives" in project else values.value.get(objectives[0]["name"], ""),
                 run_id=run_id,
                 batch_index=batch_index, candidate_index=candidate_index,
-                draft_id=draft_id, parameters=parameter_values.value,
+                draft_id=draft_id, parameters=parameter_values.value, notes=edited_notes.value,
             )
-            if candidate is not None:
-                saved = project["recommendation_batches"][batch_index]["candidates"][candidate_index]
-                # Persist the pending refresh so a later visit can finish it.
-                saved.pop("predictions", None)
-                saved["prediction_status"] = "refresh_required"
-            state["project"].value = project
+            # Persist the pending refresh so a later visit can finish it.
+            saved.pop("predictions", None)
+            saved["prediction_status"] = "refresh_required"
+            converted_draft = draft_id is not None and saved["id"] != draft_id
+            parameters_dirty.value = False
             state["message_kind"].value = "success"
-            state["message"].value = f"{label} saved. Updating predictions..." if candidate is not None else "Row saved."
-            if candidate is not None:
+            status_label = f"Run {saved['id']}" if converted_draft else label
+            state["message"].value = f"{status_label} saved. Updating predictions..."
+            state["project"].value = project
+            if not converted_draft:
                 request_prediction(project, saved["parameters"], True)
         except ValueError as exc:
             state["message_kind"].value = "error"
@@ -107,18 +113,27 @@ def ResultRow(
         state["message"].value = "Run deleted."
 
     with v.Html(tag="tr"):
-        v.Html(tag="td", children=[label])
+        with v.Html(tag="td", style_="min-width: 220px"):
+            solara.InputText(
+                "Run and notes",
+                value=edited_notes.value if edited_notes.value is not None else (
+                    saved_notes if saved_notes is not None else label
+                ),
+                on_value=lambda value: edited_notes.set(value or ""),
+                continuous_update=True,
+                dense=True,
+            )
         for parameter in state["project"].value["parameters"]:
             name = parameter["name"]
             with v.Html(tag="td"):
                 solara.InputText(
-                    f"{name} for {label}",
+                    name,
                     value=parameter_values.value.get(name, ""),
                     on_value=lambda value, name=name: update_parameter(name, value),
                     continuous_update=True,
                     dense=True,
                 )
-        for objective in objectives:
+        for objective_index, objective in enumerate(objectives):
             name = objective["name"]
             # Highlight only saved best observations, not edited-but-unsaved values.
             is_best = (
@@ -130,13 +145,16 @@ def ResultRow(
                     is_best = float(values.value.get(name, "")) == results[name]
                 except (TypeError, ValueError, OverflowError):
                     is_best = False
-            cell_style = (
-                "background-color: #e8f5e9; border-left: 3px solid #2e7d32; padding: 4px"
-                if is_best else ""
-            )
+            cell_style = "padding: 4px"
+            if objective_index == 0:
+                cell_style += "; border-left: 3px solid #546e7a"
+            if is_best:
+                cell_style += "; background-color: #e8f5e9"
+                if objective_index != 0:
+                    cell_style += "; border-left: 3px solid #2e7d32"
             with v.Html(tag="td", style_=cell_style):
                 solara.InputText(
-                    f"Result for {label}" if len(objectives) == 1 else f"{name} result for {label}",
+                    name,
                     value=values.value.get(name, ""),
                     on_value=lambda value, name=name: values.set({**values.value, name: value or ""}),
                     continuous_update=True,
@@ -144,19 +162,23 @@ def ResultRow(
                 )
                 if is_best:
                     v.Html(tag="span", style_="color: #1b5e20; font-weight: bold", children=["Best observed"])
-            if request is None:
-                prediction = candidate.get("predictions", {}).get(name) if candidate is not None else None
+            parameters_changed = candidate is None and parameters_dirty.value
+            if parameters_changed:
+                prediction = None
+            elif request is None:
+                prediction = saved_row.get("predictions", {}).get(name) if saved_row is not None else None
             else:
                 predictions = result["predictions"] if result and task.state == ResultState.FINISHED else None
                 prediction = predictions.get(name) if predictions is not None else None
-            for key in ("mean", "sigma"):
-                if prediction is not None:
-                    display = f"{prediction[key]:.6g}"
-                elif request and task.state not in (ResultState.FINISHED, ResultState.ERROR):
-                    display = "Updating..."
-                else:
-                    display = "Unavailable"
-                v.Html(tag="td", children=[display])
+            if parameters_changed:
+                display = "Save to update"
+            elif prediction is not None:
+                display = f"{prediction['mean']:.6g} ± {prediction['sigma']:.6g}"
+            elif request and task.state not in (ResultState.FINISHED, ResultState.ERROR):
+                display = "Updating..."
+            else:
+                display = "Unavailable"
+            v.Html(tag="td", children=[display], style_="white-space: nowrap")
         with v.Html(tag="td"):
             solara.Button("Save", on_click=save, color="primary")
             solara.Button("Delete", on_click=on_delete_recommendation or remove, text=True)

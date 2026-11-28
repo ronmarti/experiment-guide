@@ -44,6 +44,23 @@ class ConfigurationServiceTests(unittest.TestCase):
         self.assertEqual(updated["recommendation_batches"][0]["candidates"][0]["predictions"], {})
         self.assertEqual(self.project["runs"][0]["objective"], 3)
 
+    def test_manual_predictions_follow_configuration_changes(self):
+        prediction = {"score": {"mean": 3, "sigma": 1}}
+        self.project["runs"][0]["predictions"] = deepcopy(prediction)
+        self.project["draft_runs"] = [{"id": "draft", "parameters": {"x": 4}, "predictions": deepcopy(prediction)}]
+        renamed = self.service.save(self.project, "objective", 0, {"name": "quality", "direction": "maximize"})
+        self.assertIn("quality", renamed["runs"][0]["predictions"])
+        self.assertIn("quality", renamed["draft_runs"][0]["predictions"])
+        invalidated = self.service.save(renamed, "parameter", 0, {
+            "name": "x", "type": "continuous", "lower": "0", "upper": "9", "choices": "",
+        })
+        for row in (invalidated["runs"][0], invalidated["draft_runs"][0]):
+            self.assertNotIn("predictions", row)
+            self.assertEqual(row["prediction_status"], "configuration_changed")
+        deleted = self.service.delete(renamed, "objective", 0)
+        self.assertEqual(deleted["runs"][0]["predictions"], {})
+        self.assertEqual(deleted["draft_runs"][0]["predictions"], {})
+
 
 if __name__ == "__main__":
     unittest.main()
