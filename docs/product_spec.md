@@ -46,7 +46,7 @@ GPU execution, and AWS-specific services are outside the MVP.
 A project contains its parameter definitions, objective definitions, experiment
 runs, and generated recommendation batches. The app holds the active project
 only for the current session; the service is not a durable project store.
-The project JSON upload remains available while a project is open. A valid
+The project JSON upload remains available under Configuration while a project is open. A valid
 upload replaces the current project; an invalid upload leaves it unchanged.
 
 ### 4.1 Parameters and objective
@@ -131,7 +131,12 @@ upload replaces the current project; an invalid upload leaves it unchanged.
 
 The MVP provides:
 
+- A consistent Adaptive Experimentation page heading and a footer crediting
+  Martin Ron with a link to the project repository. The project name is editable
+  under Configuration.
 - A startup screen for the access key and a choice to create or load a project.
+- The app description and getting-started guidance appear on the authorization
+  screen and under Configuration, not on the runs screen.
 - Access key must be treated as a secure password that has to stay safe.
 - Separate editable tables for parameters, objectives, and linear constraints.
   Each configuration row has save and delete actions; adding a parameter
@@ -143,7 +148,7 @@ The MVP provides:
   table. The Runs and recommendations heading appears above the table; the
   Generate batch and Add run buttons appear below it.
 - Tables scroll horizontally when their columns do not fit the available width.
-- Best-so-far progress for each objective after each saved run, respecting
+- One common plot of best-so-far progress for all objectives after each saved run, respecting
   maximize/minimize direction and carrying the best across missing observations.
 - A scatter plot for every unordered objective pair in multiobjective projects,
   using only runs with both results observed. Label axes with objective names
@@ -160,6 +165,9 @@ The MVP provides:
 - Charts use interactive Plotly rendering with hover values and run notes,
   zoom, pan, reset, and image export. JavaScript is bundled locally rather than
   loaded from a CDN.
+- Point tooltips include the visible Run and notes value and full parameter set,
+  including linked recommendation notes. Best-so-far points identify the run
+  that achieved the value, not the later run that carries it forward.
 
 ## 7. Persistence and portability
 

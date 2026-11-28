@@ -10,13 +10,13 @@ from gui.plotly_chart import PlotlyChart
 def ObjectiveVisualization(project, plots):
     objectives = objectives_for(project)
     solara.Markdown("## Optimization progress")
-    solara.Markdown("Hover for values and run notes. Drag to zoom, use the toolbar to pan or export, and double-click to reset.")
+    solara.Markdown("Hover for values, run notes, and parameters. Drag to zoom, use the toolbar to pan or export, and double-click to reset.")
     solara.Markdown(
         "Best saved observation for each objective after each run step. "
-        "Each objective is tracked independently; these best values need not belong to the same run."
+        "Each objective is tracked independently in its original units; these best values need not belong to the same run. "
+        "Progress tooltips describe the run that achieved the best value. Click legend entries to hide or show curves."
     )
-    for objective in objectives:
-        PlotlyChart(plots.progress(project, objective))
+    PlotlyChart(plots.progress(project))
     if len(objectives) > 1:
         solara.Markdown("## Objective pairs")
         solara.Markdown(

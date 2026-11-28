@@ -74,17 +74,6 @@ def RunsView(state, services):
             best_results[name] = (max if objective["direction"] == "maximize" else min)(values)
     rows = ordered_table_rows(project)
     solara.Markdown("## Runs and recommendations")
-    solara.Markdown(
-        "Edit run notes, parameter values and results in the table, then select Save for each row. "
-        "Available objective results are used without filling in missing results. Save edits before leaving this screen. "
-        "Predicted means and sigmas are model estimates, not observed results. "
-        "Sigma is the posterior standard deviation of the expected outcome. Predictions update as you edit "
-        "recommendation parameters and when you save any row; previews use saved observations and are not saved until you save the row. "
-        "Wait for updating to finish before downloading; interrupted saved refreshes resume when this tab is reopened. "
-        "Predictions are unavailable without observations, for incomplete parameters, or for objectives not modeled yet. "
-        "Best observed values are highlighted for each objective, including ties; unsaved edits are not ranked. "
-        "Deleting a recommendation also deletes its linked run, if any."
-    )
     
     if rows:
         with v.Html(

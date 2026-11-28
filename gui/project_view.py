@@ -30,12 +30,6 @@ def ProjectView(state, services):
     def download_json():
         return json.dumps(project, indent=2, ensure_ascii=False).encode("utf-8")
 
-    solara.Markdown(f"# {project['name']}")
-    solara.InputText(
-        "Project name",
-        value=project["name"],
-        on_value=name_project,
-    )
     solara.FileDownload(
         download_json,
         filename=f"{project['name'].replace(' ', '_')}.json",
@@ -45,11 +39,6 @@ def ProjectView(state, services):
     solara.Warning(
         "No automatic save: download this JSON before closing or losing the session.",
     )
-    solara.Markdown(
-        "Upload another project JSON to replace the current project. Download the current project first to keep its changes."
-    )
-    ProjectUpload(state, services, on_load=replace_project)
-
     if not switching.value:
         lab.Tabs(
             value=tab,
@@ -59,6 +48,17 @@ def ProjectView(state, services):
             ],
         )
         if tab.value == 0:
+            with solara.Card("Project JSON"):
+                solara.InputText(
+                    "Project name",
+                    value=project["name"],
+                    on_value=name_project,
+                )
+                solara.Markdown(
+                    "Upload another project JSON to replace the current project. "
+                    "Download the current project first to keep its changes."
+                )
+                ProjectUpload(state, services, on_load=replace_project)
             ParameterConfiguration(state, services.configuration)
         elif tab.value == 1:
             RunsView(state, services)

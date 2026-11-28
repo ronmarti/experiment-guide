@@ -23,9 +23,17 @@ def Page():
     ):
         # Vuetify nests flex applications; the inner one must shrink for table scrollbars to work.
         solara.Style(".v-application .v-application { min-width: 0; }")
+        solara.Markdown("# Adaptive Experimentation")
         if not state["authorized"].value:
             Startup(state)
         elif state["project"].value is None:
             ProjectSelection(state, services)
         else:
             ProjectView(state, services)
+        with v.Html(tag="footer", style_="margin-top: 32px; padding-top: 16px; border-top: 1px solid #ddd"):
+            v.Html(tag="span", children=["By Martin Ron | "])
+            v.Html(
+                tag="a",
+                attributes={"href": "https://github.com/ronmarti/experiment-guide"},
+                children=["GitHub"],
+            )

@@ -8,9 +8,14 @@ Set `APP_ACCESS_KEY` and run `docker compose up --build`, then open
 http://localhost:8765. Enter the key and select **Authorize**. After login,
 create a blank project or upload an exported project JSON file.
 
+The `prod-cpu` target in `.devcontainer/Dockerfile` builds the application
+virtual environment in `prod-cpu-build` and copies it at the same path into a
+fresh Python slim runtime. Poetry and its build-stage dependencies stay out of
+the production image. Dependencies still come from the existing Poetry lock.
+
 Projects are kept only in the current session. Download the project JSON
 before closing the session or restarting the container to retain your changes.
-You can upload another project JSON at any time to replace the active project;
+You can upload another project JSON under **Configuration** to replace the active project;
 download your current project first if you want to keep it.
 
 On **Runs and recommendations**, generate a batch or select **Add run** to
@@ -26,8 +31,10 @@ add separate runs and do not automatically match recommendations, since paramete
 values may repeat.
 The best saved observed values are highlighted for each objective, including
 ties; unsaved edits and predictions are not ranked.
-Optimization progress plots show the best-so-far saved result for each objective
-at each run step. Multiobjective projects also show every objective pair as a
+One shared optimization progress plot shows the best-so-far saved result for
+each objective at each run step, in its original units. Tooltips show the visible
+Run and notes text and full parameter set; best-so-far points describe the run
+that achieved that value. Multiobjective projects also show every objective pair as a
 scatter plot, using only runs with both results measured. A red dashed line
 connects the pairwise Pareto frontier; connecting segments are visual guides,
 not guaranteed attainable outcomes.

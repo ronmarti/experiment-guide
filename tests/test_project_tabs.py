@@ -18,7 +18,12 @@ class ProjectTabsTests(unittest.TestCase):
         }
         _, context = solara.render(ProjectView(state, AppServices()), handle_error=False)
         try:
+            field = next(w for w in context.find(v.TextField).widgets if w.label == "Project name")
+            field.v_model = "My project"
+            field.fire_event("focusout", {})
+            self.assertEqual(state["project"].value["name"], "My project")
             context.find(v.Tabs).widget.v_model = 1
+            self.assertFalse(any(w.label == "Project name" for w in context.find(v.TextField).widgets))
             self.assertEqual(context.find(v.Tabs).widget.v_model, 1)
             self.assertTrue(any(
                 "Configure at least one parameter and an objective first." in alert.children
@@ -35,6 +40,7 @@ class ProjectTabsTests(unittest.TestCase):
 
             context.find(v.Tabs).widget.v_model = 0
             self.assertEqual(context.find(v.Tabs).widget.v_model, 0)
+            self.assertEqual(next(w for w in context.find(v.TextField).widgets if w.label == "Project name").v_model, "Renamed")
             self.assertTrue(any(
                 "Add parameter" in button.children
                 for button in context.find(v.Btn).widgets

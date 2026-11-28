@@ -33,13 +33,14 @@ class ObjectiveVisualizationTests(unittest.TestCase):
         }
 
     def test_running_best_respects_direction_and_missing_results(self):
-        score, cost, _ = self.project["objectives"]
-        score_line = self.plots.progress(self.project, score).data[0]
-        cost_line = self.plots.progress(self.project, cost).data[0]
+        figure = self.plots.progress(self.project)
+        score_line, cost_line, _ = figure.data
         self.assertEqual(list(score_line.x), [2, 3, 4, 5, 6])
         self.assertEqual(list(score_line.y), [-3, -3, -1, -1, -1])
         self.assertEqual(list(cost_line.y), [8, 8, 8, 4, 4])
         self.assertEqual(score_line.line.shape, "hv")
+        self.assertEqual([trace.name for trace in figure.data],
+                         ["score (maximize)", "cost (minimize)", "unmeasured (maximize)"])
 
     def test_pair_uses_only_joint_observations(self):
         score, cost, _ = self.project["objectives"]
@@ -108,10 +109,10 @@ class ObjectiveVisualizationTests(unittest.TestCase):
         project = blank_project()
         project["objective"] = {"name": "score", "direction": "maximize"}
         project["runs"] = [{"objective": 2}, {"objective": 1}, {"objective": 4}]
-        line = self.plots.progress(project, project["objective"]).data[0]
+        line = self.plots.progress(project).data[0]
         self.assertEqual(list(line.y), [2, 2, 4])
         score, _, unmeasured = self.project["objectives"]
-        figure = self.plots.progress(self.project, unmeasured)
+        figure = self.plots.progress({**self.project, "objectives": [unmeasured]})
         self.assertEqual(len(figure.data[0].y), 0)
         self.assertEqual(figure.layout.annotations[0].text, "No saved observations")
         figure = self.plots.pair(self.project, score, unmeasured)
@@ -134,9 +135,9 @@ class ObjectiveVisualizationTests(unittest.TestCase):
         with patch("gui.objective_visualization.PlotlyChart", figure_plot):
             _, context = solara.render(view(), handle_error=False)
             try:
-                self.assertEqual(len(figures), 6)
+                self.assertEqual(len(figures), 4)
                 self.assertEqual(
-                    [figure.layout.title.text for figure in figures[3:]],
+                    [figure.layout.title.text for figure in figures[1:]],
                     ["score vs cost", "score vs unmeasured", "cost vs unmeasured"],
                 )
                 figures.clear()
@@ -149,7 +150,7 @@ class ObjectiveVisualizationTests(unittest.TestCase):
         self.project["runs"][1]["notes"] = "Control"
         score, cost, _ = self.project["objectives"]
         figure = self.plots.pair(self.project, score, cost)
-        self.assertEqual(figure.data[0].customdata[0], "Control")
+        self.assertIn("Run and notes: Control", figure.data[0].customdata[0])
         root, context = solara.render(PlotlyChart(figure), handle_error=False)
         try:
             frame = next(w for w in widgets(root) if getattr(w, "tag", None) == "iframe")
@@ -160,6 +161,37 @@ class ObjectiveVisualizationTests(unittest.TestCase):
             self.assertEqual(frame.attributes["title"], "score vs cost")
         finally:
             context.close()
+
+    def test_hover_details_match_linked_row_and_best_observation(self):
+        self.project["runs"][1].update({"id": 1, "notes": "Hidden run label", "parameters": {"x": 2, "color": "red"}})
+        self.project["runs"][2].update({"id": 2, "notes": "Worse run", "parameters": {"x": 3}})
+        self.project["recommendation_batches"][0]["candidates"].append({
+            "run_id": 1, "notes": "Linked <candidate>", "parameters": {"x": 2, "color": "red"},
+        })
+        score, cost, _ = self.project["objectives"]
+        pair = self.plots.pair(self.project, score, cost)
+        details = pair.data[0].customdata[0]
+        self.assertIn("Linked &lt;candidate&gt;", details)
+        self.assertIn("x: 2", details)
+        self.assertIn("color: red", details)
+        self.assertNotIn("Hidden run label", details)
+        self.assertEqual(pair.data[1].customdata[0], details)
+        progress = self.plots.progress(self.project)
+        self.assertEqual(progress.data[0].customdata[0], details)
+        self.assertEqual(progress.data[0].customdata[1], details)
+
+    def test_duplicate_frontier_tooltip_lists_all_corresponding_runs(self):
+        self.project["runs"] = [
+            {"id": 1, "notes": "First", "parameters": {"x": 2}, "results": {"score": 5, "cost": 1}},
+            {"id": 2, "notes": "", "parameters": {"x": 3}, "results": {"score": 5, "cost": 1}},
+        ]
+        score, cost, _ = self.project["objectives"]
+        pair = self.plots.pair(self.project, score, cost)
+        details = pair.data[1].customdata[0]
+        self.assertIn("Run and notes: First", details)
+        self.assertIn("Run and notes: <br>", details)
+        self.assertIn("x: 2", details)
+        self.assertIn("x: 3", details)
 
 
 if __name__ == "__main__":

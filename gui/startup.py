@@ -4,6 +4,7 @@ import reacton.ipyvue as vue
 import solara
 
 from gui.alert_message import AlertMessage
+from gui.app_description import AppDescription
 
 ACCESS_KEY = os.environ.get("APP_ACCESS_KEY", "change-me")
 
@@ -21,7 +22,7 @@ def Startup(state):
             state["message"].value = "Invalid access key."
 
     with solara.Card("Welcome"):
-        solara.Markdown("## Adaptive Experimentation")
+        AppDescription()
         key_field = solara.InputText(
             "Access key",
             value=key,

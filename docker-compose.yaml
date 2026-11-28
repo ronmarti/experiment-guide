@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: prod
+      target: prod-cpu
     image: experiment-guide
     restart: unless-stopped
     ports:

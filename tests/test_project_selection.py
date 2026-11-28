@@ -54,15 +54,52 @@ class ProjectSelectionTests(unittest.TestCase):
                 self.assertIn("padding:", section().style_)
                 self.assertIn("box-sizing: border-box", section().style_)
                 self.assertIn("overflow-x: auto", section().style_)
+                def verify_page_chrome():
+                    headings = [
+                        w for w in widgets(root)
+                        if isinstance(getattr(w, "template", None), str)
+                        and 'id="adaptive-experimentation"' in w.template
+                    ]
+                    self.assertEqual(len(headings), 1)
+                    footer = next(w for w in widgets(root) if getattr(w, "tag", None) == "footer")
+                    self.assertTrue(any("By Martin Ron" in str(getattr(w, "children", ())) for w in widgets(footer)))
+                    link = next(w for w in widgets(footer) if getattr(w, "tag", None) == "a")
+                    self.assertEqual(link.attributes["href"], "https://github.com/ronmarti/experiment-guide")
+
+                verify_page_chrome()
                 self.assertTrue(any(
                     ".v-application .v-application { min-width: 0; }" in getattr(w, "template", "")
                     for w in widgets(section())
                 ))
                 self.state["authorized"].value = True
+                verify_page_chrome()
                 self.assertIn("padding:", section().style_)
                 self.state["project"].value = blank_project()
+                verify_page_chrome()
                 self.assertIn("padding:", section().style_)
                 self.assertTrue(any("Add parameter" in b.children for b in context.find(v.Btn).widgets))
+            finally:
+                context.close()
+
+    def test_app_description_is_on_authorization_and_configuration_only(self):
+        with patch("gui.app.session_state", return_value=self.state):
+            root, context = solara.render(Page(), handle_error=False)
+            try:
+                def description_visible():
+                    return any(
+                        isinstance(getattr(w, "template", None), str)
+                        and "This app tries to bring simple general UI" in w.template
+                        for w in widgets(root)
+                    )
+
+                self.assertTrue(description_visible())
+                self.state["authorized"].value = True
+                self.state["project"].value = blank_project()
+                self.assertTrue(description_visible())
+                context.find(v.Tabs).widget.v_model = 1
+                self.assertFalse(description_visible())
+                context.find(v.Tabs).widget.v_model = 0
+                self.assertTrue(description_visible())
             finally:
                 context.close()
 
@@ -159,8 +196,11 @@ class ProjectSelectionTests(unittest.TestCase):
                            and w.children and row_label(w) == "Run 1")
                 next(w for w in widgets(row) if isinstance(w, v.TextField) and w.label == "x").v_model = "3"
                 upload["data"] = json.dumps(project).encode()
+                self.assertFalse(any("Load project JSON" in b.children for b in context.find(v.Btn).widgets))
+                context.find(v.Tabs).widget.v_model = 0
                 click("Load project JSON")
                 self.assertEqual(self.state["project"].value, project)
+                context.find(v.Tabs).widget.v_model = 1
                 self.assertEqual(context.find(v.Tabs).widget.v_model, 1)
                 row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
                            and w.children and row_label(w) == "Run 1")
@@ -231,6 +271,7 @@ class ProjectSelectionTests(unittest.TestCase):
                            and w.children and row_label(w) == "Batch 1, recommendation 1")
                 next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
                 self.assertTrue(started.wait(5))
+                context.find(v.Tabs).widget.v_model = 0
                 next(b for b in context.find(v.Btn).widgets if "Load project JSON" in b.children).fire_event("click", {})
                 release.set()
                 self.assertTrue(completed.wait(5))

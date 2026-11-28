@@ -1,42 +1,60 @@
+from html import escape
 from typing import Any
 
 import plotly.graph_objects as go
 
-from experiment.model.project import results_for
+from experiment.model.project import objectives_for, results_for
 
 
 class ObjectivePlots:
     """Build progress and pairwise trade-off plots from saved objective measurements."""
 
-    def progress(self, project: dict[str, Any], objective: dict[str, str]) -> go.Figure:
-        """Plot the running best after each saved run, carrying it across missing results."""
-        name = objective["name"]
-        choose_best = max if objective["direction"] == "maximize" else min
-        steps, values, run_labels = [], [], []
-        best = None
-        for step, run in enumerate(project["runs"], 1):
-            results = results_for(project, run)
-            if name in results:
-                best = results[name] if best is None else choose_best(best, results[name])
-            if best is not None:
-                steps.append(step)
-                values.append(best)
-                run_labels.append(run.get("notes", f"Run {run.get('id', step)}"))
-        figure = go.Figure(go.Scatter(
-            x=steps, y=values, mode="lines+markers", line={"shape": "hv"},
-            customdata=run_labels, name="Best so far",
-            hovertemplate="Step %{x}<br>%{customdata}<br>Best so far: %{y}<extra></extra>",
-        ))
+    def progress(self, project: dict[str, Any]) -> go.Figure:
+        """Plot all objectives' running best values together in their original units."""
+        details = self._run_details(project)
+        figure = go.Figure()
+        for objective in objectives_for(project):
+            figure.add_trace(self._progress_trace(project, objective, details))
         figure.update_layout(
-            template="plotly_white", title=f"{name}: best so far ({objective['direction']})",
-            xaxis_title="Run step", yaxis_title=name, height=350,
-            margin={"l": 65, "r": 25, "t": 65, "b": 55}, autosize=True,
+            template="plotly_white", title="Best-so-far objective progress",
+            xaxis_title="Run step", yaxis_title="Best objective value", height=420,
+            margin={"l": 65, "r": 25, "t": 65, "b": 85}, autosize=True,
+            legend={"orientation": "h", "y": -0.2},
         )
         figure.update_xaxes(tickmode="linear", dtick=1)
-        if not values:
+        if not any(len(trace.y) for trace in figure.data):
             figure.add_annotation(x=0.5, y=0.5, xref="paper", yref="paper",
                                   text="No saved observations", showarrow=False)
         return figure
+
+    def _progress_trace(
+        self, project: dict[str, Any], objective: dict[str, str], details: list[str],
+    ) -> go.Scatter:
+        """Carry the best value and its originating run details across subsequent steps."""
+        name = objective["name"]
+        steps, values, run_labels = [], [], []
+        best = None
+        best_details = ""
+        for step, run in enumerate(project["runs"], 1):
+            results = results_for(project, run)
+            improves = name in results and (
+                best is None or (
+                    results[name] > best if objective["direction"] == "maximize" else results[name] < best
+                )
+            )
+            if improves:
+                best = results[name]
+                best_details = details[step - 1]
+            if best is not None:
+                steps.append(step)
+                values.append(best)
+                run_labels.append(best_details)
+        return go.Scatter(
+            x=steps, y=values, mode="lines+markers", line={"shape": "hv"},
+            customdata=run_labels, name=f"{name} ({objective['direction']})",
+            hovertemplate="Step %{x}<br>" + escape(name) + " best so far: %{y}<br>"
+            "Best observed run:<br>%{customdata}<extra></extra>",
+        )
 
     def pair(
         self, project: dict[str, Any], first: dict[str, str], second: dict[str, str],
@@ -44,12 +62,16 @@ class ObjectivePlots:
         """Plot joint observations, their pairwise frontier, and the preferred direction."""
         x_name, y_name = first["name"], second["name"]
         points, run_labels = [], []
+        details = self._run_details(project)
+        details_by_point: dict[tuple[float, float], list[str]] = {}
         for step, run in enumerate(project["runs"], 1):
             results = results_for(project, run)
             if x_name not in results or y_name not in results:
                 continue
-            points.append((results[x_name], results[y_name]))
-            run_labels.append(run.get("notes", f"Run {run.get('id', step)}"))
+            point = (results[x_name], results[y_name])
+            points.append(point)
+            run_labels.append(details[step - 1])
+            details_by_point.setdefault(point, []).append(details[step - 1])
         figure = go.Figure(go.Scatter(
             x=[point[0] for point in points], y=[point[1] for point in points],
             mode="markers", name="Observed runs", customdata=run_labels,
@@ -62,7 +84,9 @@ class ObjectivePlots:
                 x=[point[0] for point in frontier], y=[point[1] for point in frontier],
                 mode="lines+markers", line={"color": "#c62828", "dash": "dash"},
                 name="Pairwise Pareto frontier",
-                hovertemplate=x_name + ": %{x}<br>" + y_name + ": %{y}<extra>Pairwise Pareto frontier</extra>",
+                customdata=["<br><br>".join(details_by_point[point]) for point in frontier],
+                hovertemplate="%{customdata}<br>" + x_name + ": %{x}<br>" + y_name
+                + ": %{y}<extra>Pairwise Pareto frontier</extra>",
             ))
         figure.update_layout(
             template="plotly_white", title=f"{x_name} vs {y_name}",
@@ -90,6 +114,24 @@ class ObjectivePlots:
             font={"color": "#1b5e20"}, arrowcolor="#1b5e20", arrowwidth=2, arrowhead=2,
         )
         return figure
+
+    def _run_details(self, project: dict[str, Any]) -> list[str]:
+        """Build hover text matching visible row notes, including linked recommendation rows."""
+        labels = {}
+        for batch_index, batch in enumerate(project.get("recommendation_batches", []), 1):
+            for candidate_index, candidate in enumerate(batch["candidates"], 1):
+                if "run_id" in candidate:
+                    labels[candidate["run_id"]] = candidate.get(
+                        "notes", f"Batch {batch_index}, recommendation {candidate_index}",
+                    )
+        details = []
+        for step, run in enumerate(project["runs"], 1):
+            label = labels.get(run.get("id"), run.get("notes", f"Run {run.get('id', step)}"))
+            parameters = "<br>".join(
+                f"{escape(name)}: {escape(str(value))}" for name, value in run.get("parameters", {}).items()
+            )
+            details.append(f"Run and notes: {escape(label)}<br>Parameters:<br>{parameters}")
+        return details
 
     def _pareto_frontier(
         self, points: list[tuple[float, float]], x_direction: str, y_direction: str,

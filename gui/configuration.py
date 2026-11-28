@@ -6,6 +6,7 @@ import solara
 from experiment.model.project import objectives_for
 from experiment.services.constraints import validate_constraints
 from gui.alert_message import AlertMessage
+from gui.app_description import AppDescription
 from gui.configuration_row import ConfigurationRow
 
 
@@ -70,6 +71,7 @@ def ParameterConfiguration(state, configuration):
                         ).key(draft_id)
 
     AlertMessage(state)
+    AppDescription()
     solara.Markdown(
         "Save each configuration row before leaving this screen. Existing measurements are retained "
         "when definitions change."
