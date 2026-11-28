@@ -28,7 +28,11 @@ The best saved observed values are highlighted for each objective, including
 ties; unsaved edits and predictions are not ranked.
 Optimization progress plots show the best-so-far saved result for each objective
 at each run step. Multiobjective projects also show every objective pair as a
-scatter plot, using only runs with both results measured.
+scatter plot, using only runs with both results measured. A red dashed line
+connects the pairwise Pareto frontier; connecting segments are visual guides,
+not guaranteed attainable outcomes.
+Charts use Plotly with hover details, zoom/pan controls, and image export.
+The Plotly JavaScript bundle is embedded locally; no CDN is required.
 Each row shows the model's predicted mean ± sigma for each objective
 alongside, but separately from, observed results. Sigma is the
 posterior standard deviation of the expected outcome, not measurement error.

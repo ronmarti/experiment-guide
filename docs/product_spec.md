@@ -148,8 +148,18 @@ The MVP provides:
 - A scatter plot for every unordered objective pair in multiobjective projects,
   using only runs with both results observed. Label axes with objective names
   and directions; exclude predictions and unobserved recommendations.
+  Highlight the preferred corner and point toward improvement for both objectives,
+  respecting their directions. This is a direction cue, not a target threshold
+  or a guarantee of feasibility.
+  Overlay the pairwise Pareto frontier of jointly observed results. Deduplicate
+  coincident frontier points, respect both directions, and distinguish the
+  frontier from other observations. Connecting segments are visual guides,
+  not guaranteed attainable outcomes or the full multiobjective frontier.
 - A project JSON download action and clear feedback for invalid input or errors.
-- Parameter-response plots, Pareto-front overlays, and convergence indicators are deferred.
+- Parameter-response plots and convergence indicators are deferred.
+- Charts use interactive Plotly rendering with hover values and run notes,
+  zoom, pan, reset, and image export. JavaScript is bundled locally rather than
+  loaded from a CDN.
 
 ## 7. Persistence and portability
 

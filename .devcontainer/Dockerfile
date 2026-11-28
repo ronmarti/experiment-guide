@@ -113,8 +113,7 @@ RUN poetry install --no-interaction --no-ansi --no-cache --no-root && \
 COPY . ./
 ENV PATH="/opt/experiment-guide-venv/bin:$PATH" \
     PYTHONPATH=/experiment-guide \
-    MPLBACKEND=Agg \
-    CPHGMM_RUNS_DIR=/data/runs
+    MPLBACKEND=Agg
 VOLUME /data
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
