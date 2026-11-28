@@ -1,6 +1,14 @@
-# experiment-guide
+# Adaptive Experimentation Guide
 
 App for adaptive experimentation. It stores, visualizes results and propose next experiments based on the given data.
+
+Imagine e.g. you want to bake a better bread and you want to systematically explore different ingredient combinations and baking conditions to find the optimal recipe. After each baking attempt, you assign a score to the taste and structure of the bread. The app helps you keep track of these experiments and guides you towards the best combination of ingredients and conditions.
+
+## Try it out
+The app is available at 
+[experiment-guide-526e4.containers.snapdeploy.app](https://experiment-guide-526e4.containers.snapdeploy.app), it takes a minute to spin up.
+
+For now, I leave the **authorization key "123"**.
 
 ## Start a project
 
@@ -70,14 +78,4 @@ Run the unit and UI component tests with:
 
 ```sh
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 poetry run python -m unittest discover -s tests -v
-```
-
-## Try it out
-
-Try the python method with some noise:
-
-```python
-import numpy as np
-z = lambda x, y: np.exp(-((x-1.67)*(y-1.35))**2) + np.exp( -1.2*(x+1.16)**2 ) + 0.1*np.random.normal()
-z(0, 0)
 ```
