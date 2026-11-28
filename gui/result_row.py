@@ -3,6 +3,7 @@ from copy import deepcopy
 import reacton.ipyvuetify as v
 import solara
 from solara.datatypes import ResultState
+from solara.util import IPYVUETIFY_V3
 
 from experiment.model.project import objectives_for
 
@@ -113,7 +114,7 @@ def ResultRow(
         state["message"].value = "Run deleted."
 
     with v.Html(tag="tr"):
-        with v.Html(tag="td", style_="min-width: 220px"):
+        with v.Html(tag="td", style_="min-width: 220px; padding: 4px 8px; vertical-align: top"):
             solara.InputText(
                 "Run and notes",
                 value=edited_notes.value if edited_notes.value is not None else (
@@ -122,17 +123,33 @@ def ResultRow(
                 on_value=lambda value: edited_notes.set(value or ""),
                 continuous_update=True,
                 dense=True,
+                hide_details=True,
             )
         for parameter in state["project"].value["parameters"]:
             name = parameter["name"]
-            with v.Html(tag="td"):
-                solara.InputText(
-                    name,
-                    value=parameter_values.value.get(name, ""),
-                    on_value=lambda value, name=name: update_parameter(name, value),
-                    continuous_update=True,
-                    dense=True,
-                )
+            with v.Html(tag="td", style_="padding: 4px 8px; vertical-align: top"):
+                if parameter["type"] in ("categorical", "choice", "str"):
+                    value = parameter_values.value.get(name, "")
+                    v.Select(
+                        label=name, items=parameter["choices"], v_model=value or None,
+                        on_v_model=lambda value, name=name: update_parameter(name, value),
+                        hide_details=True,
+                        **({"density": "compact"} if IPYVUETIFY_V3 else {"dense": True}),
+                    )
+                    if value and value not in parameter["choices"]:
+                        v.Html(
+                            tag="div", style_="color: #b71c1c",
+                            children=[f"Current value {value!r} is not an available choice. Select a current choice."],
+                        )
+                else:
+                    solara.InputText(
+                        name,
+                        value=parameter_values.value.get(name, ""),
+                        on_value=lambda value, name=name: update_parameter(name, value),
+                        continuous_update=True,
+                        dense=True,
+                        hide_details=True,
+                    )
         for objective_index, objective in enumerate(objectives):
             name = objective["name"]
             # Highlight only saved best observations, not edited-but-unsaved values.
@@ -145,7 +162,7 @@ def ResultRow(
                     is_best = float(values.value.get(name, "")) == results[name]
                 except (TypeError, ValueError, OverflowError):
                     is_best = False
-            cell_style = "padding: 4px"
+            cell_style = "padding: 4px 8px; vertical-align: top"
             if objective_index == 0:
                 cell_style += "; border-left: 3px solid #546e7a"
             if is_best:
@@ -159,6 +176,7 @@ def ResultRow(
                     on_value=lambda value, name=name: values.set({**values.value, name: value or ""}),
                     continuous_update=True,
                     dense=True,
+                    hide_details=True,
                 )
                 if is_best:
                     v.Html(tag="span", style_="color: #1b5e20; font-weight: bold", children=["Best observed"])

@@ -19,8 +19,10 @@ def Page():
     services = solara.use_memo(AppServices, dependencies=[])
     with v.Html(
         tag="section",
-        style_="width: 100%; max-width: 1600px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 40px); box-sizing: border-box; min-width: 0",
+        style_="width: 100%; max-width: 1600px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 40px); box-sizing: border-box; min-width: 0; overflow-x: auto",
     ):
+        # Vuetify nests flex applications; the inner one must shrink for table scrollbars to work.
+        solara.Style(".v-application .v-application { min-width: 0; }")
         if not state["authorized"].value:
             Startup(state)
         elif state["project"].value is None:

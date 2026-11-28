@@ -53,6 +53,11 @@ class ProjectSelectionTests(unittest.TestCase):
 
                 self.assertIn("padding:", section().style_)
                 self.assertIn("box-sizing: border-box", section().style_)
+                self.assertIn("overflow-x: auto", section().style_)
+                self.assertTrue(any(
+                    ".v-application .v-application { min-width: 0; }" in getattr(w, "template", "")
+                    for w in widgets(section())
+                ))
                 self.state["authorized"].value = True
                 self.assertIn("padding:", section().style_)
                 self.state["project"].value = blank_project()

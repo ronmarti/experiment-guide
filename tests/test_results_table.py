@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import ipyvuetify as v
 import solara
+from solara.util import IPYVUETIFY_V3
 
 from experiment.model.project import blank_project, upgrade_project
 from gui.runs_view import RunsView
@@ -161,6 +162,139 @@ class ResultsTableTests(unittest.TestCase):
                 self.assertEqual(fields, ["Run and notes", "x", "y", "score", "cost"])
                 self.assertEqual(len(row.children), len(header.children))
                 self.assertIn("border-left: 3px", row.children[3].style_)
+        finally:
+            context.close()
+
+    def test_runs_table_has_keyboard_accessible_horizontal_scroll(self):
+        project = self.state["project"].value
+        upgrade_project(project)
+        project["parameters"].append({"name": "y", "type": "continuous", "bounds": [0, 10]})
+        project["objectives"].append({"name": "cost", "direction": "minimize"})
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+        try:
+            region = next(w for w in widgets(root) if getattr(w, "attributes", {}).get("aria-label") == "Runs and recommendations table")
+            self.assertIn("overflow-x: auto", region.style_)
+            self.assertIn("max-width: 100%", region.style_)
+            self.assertEqual(region.attributes["tabindex"], "0")
+            table = next(w for w in widgets(region) if getattr(w, "tag", None) == "table")
+            header = next(w for w in widgets(table) if getattr(w, "tag", None) == "tr")
+            self.assertTrue(all("min-width:" in cell.style_ for cell in header.children))
+        finally:
+            context.close()
+
+    def test_categorical_choices_for_runs_recommendations_and_drafts(self):
+        project = self.services.configuration.save(self.state["project"].value, "parameter", None, {
+            "name": "color", "type": "categorical", "lower": "", "upper": "",
+            "choices": "red, blue, warm green",
+        })
+        project["runs"][0]["parameters"]["color"] = "red"
+        for candidate in project["recommendation_batches"][0]["candidates"]:
+            candidate["parameters"]["color"] = "blue"
+        self.state["project"].value = project
+
+        def predict(current, point):
+            return {"score": {"mean": 5 if point["color"] == "warm green" else 2, "sigma": 0.5}}
+
+        with patch.object(self.services.optimizer, "predict", side_effect=predict):
+            root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+            try:
+                def row(label):
+                    return next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                                and w.children and row_label(w) == label)
+
+                def dropdown(label):
+                    return next(w for w in widgets(row(label)) if isinstance(w, v.Select) and w.label == "color")
+
+                def save(label):
+                    next(w for w in widgets(row(label)) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+
+                self.assertEqual(dropdown("Run 1").items, ["red", "blue", "warm green"])
+                self.assertEqual(dropdown("Run 1").v_model, "red")
+                self.assertTrue(any(isinstance(w, v.TextField) and w.label == "x" for w in widgets(row("Run 1"))))
+                dropdown("Run 1").v_model = "blue"
+                save("Run 1")
+                self.assertEqual(self.state["project"].value["runs"][0]["parameters"]["color"], "blue")
+
+                label = "Batch 1, recommendation 1"
+                self.assertEqual(dropdown(label).v_model, "blue")
+                dropdown(label).v_model = "warm green"
+                wait_for(lambda: any(
+                    getattr(c, "tag", None) == "td" and "5 ± 0.5" in c.children for c in row(label).children
+                ))
+                next(w for w in widgets(row(label)) if isinstance(w, v.TextField) and w.label == "score").v_model = "9"
+                save(label)
+                candidate = self.state["project"].value["recommendation_batches"][0]["candidates"][0]
+                self.assertEqual(candidate["parameters"]["color"], "warm green")
+                linked = next(run for run in self.state["project"].value["runs"] if run["id"] == candidate["run_id"])
+                self.assertEqual(linked["parameters"]["color"], "warm green")
+                dropdown(label).v_model = "red"
+                save(label)
+                self.assertEqual(self.state["project"].value["runs"][-1]["parameters"]["color"], "red")
+
+                next(b for b in context.find(v.Btn).widgets if "Add run" in b.children).fire_event("click", {})
+                draft_id = self.state["project"].value["draft_runs"][0]["id"]
+                label = f"New run {draft_id[:8]}"
+                self.assertIsNone(dropdown(label).v_model)
+                dropdown(label).v_model = "red"
+                next(w for w in widgets(row(label)) if isinstance(w, v.TextField) and w.label == "x").v_model = "8"
+                save(label)
+                project = self.state["project"].value
+                self.assertEqual(project["draft_runs"][0]["parameters"], {"x": 8, "color": "red"})
+                restored = self.services.files.load_json(json.dumps(project).encode())
+            finally:
+                context.close()
+
+            self.state["project"].value = restored
+            root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+            try:
+                self.assertEqual(dropdown("Run 1").v_model, "blue")
+                self.assertEqual(dropdown("Batch 1, recommendation 1").v_model, "red")
+                self.assertEqual(dropdown(label).v_model, "red")
+            finally:
+                context.close()
+
+    def test_obsolete_categorical_values_remain_visible_and_need_correction(self):
+        project = self.state["project"].value
+        upgrade_project(project)
+        project["parameters"].append({"name": "color", "type": "choice", "choices": ["red", "blue"]})
+        project["runs"][0]["parameters"]["color"] = "retired"
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+        try:
+            row = next(w for w in widgets(root) if getattr(w, "tag", None) == "tr"
+                       and w.children and row_label(w) == "Run 1")
+            dropdown = next(w for w in widgets(row) if isinstance(w, v.Select) and w.label == "color")
+            self.assertEqual(dropdown.items, ["red", "blue"])
+            self.assertTrue(any("retired" in str(getattr(w, "children", ())) for w in widgets(row)))
+            next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+            self.assertEqual(self.state["project"].value["runs"][0]["parameters"]["color"], "retired")
+            self.assertEqual(self.state["message_kind"].value, "error")
+            dropdown.v_model = "red"
+            next(w for w in widgets(row) if isinstance(w, v.Btn) and "Save" in w.children).fire_event("click", {})
+            self.assertEqual(self.state["project"].value["runs"][0]["parameters"]["color"], "red")
+        finally:
+            context.close()
+
+    def test_categorical_and_text_controls_share_row_spacing(self):
+        project = self.state["project"].value
+        upgrade_project(project)
+        project["parameters"].append({"name": "color", "type": "categorical", "choices": ["red", "blue"]})
+        project["runs"][0]["parameters"]["color"] = "retired"
+        root, context = solara.render(RunsView(self.state, self.services), handle_error=False)
+        try:
+            rows = [w for w in widgets(root) if getattr(w, "tag", None) == "tr"][1:]
+            for row in rows:
+                for cell in row.children:
+                    controls = [w for w in widgets(cell) if isinstance(w, (v.TextField, v.Select))]
+                    if not controls:
+                        continue
+                    self.assertIn("padding: 4px 8px", cell.style_)
+                    self.assertIn("vertical-align: top", cell.style_)
+                    for control in controls:
+                        self.assertTrue(control.hide_details)
+                        if IPYVUETIFY_V3:
+                            self.assertEqual(control.density, "compact")
+                        else:
+                            self.assertTrue(control.dense)
         finally:
             context.close()
 

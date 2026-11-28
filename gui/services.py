@@ -5,6 +5,7 @@ from experiment.services.prediction import PredictionController
 from experiment.services.run_table import RunTableService
 from experiment.services.runs import RunService
 from experiment.services.validation import ProjectValidator
+from gui.objective_plots import ObjectivePlots
 
 
 class AppServices:
@@ -19,3 +20,4 @@ class AppServices:
         self.runs = RunService()
         self.predictions = PredictionController(self.optimizer)
         self.table = RunTableService(self.runs, self.files, self.optimizer)
+        self.plots = ObjectivePlots()

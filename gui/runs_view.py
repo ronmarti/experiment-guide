@@ -1,6 +1,5 @@
 import uuid
 
-import matplotlib.pyplot as plt
 import reacton.ipyvuetify as v
 import solara
 
@@ -9,6 +8,7 @@ from experiment.model.table_order import ordered_table_rows
 from experiment.services.values import validate_parameters
 from gui.alert_message import AlertMessage
 from gui.result_row import ResultRow
+from gui.objective_visualization import ObjectiveVisualization
 
 
 @solara.component
@@ -87,7 +87,11 @@ def RunsView(state, services):
     )
     
     if rows:
-        with v.Html(tag="div", style_="overflow-x: auto"):
+        with v.Html(
+            tag="div",
+            style_="width: 100%; max-width: 100%; min-width: 0; overflow-x: auto",
+            attributes={"tabindex": "0", "role": "region", "aria-label": "Runs and recommendations table"},
+        ):
             with v.Html(tag="table", style_="width: 100%; border-collapse: collapse"):
                 with v.Html(tag="thead"):
                     with v.Html(tag="tr"):
@@ -98,6 +102,12 @@ def RunsView(state, services):
                         headings.append("Actions")
                         for index, heading in enumerate(headings):
                             style = "text-align: left; padding: 8px"
+                            if index == 0:
+                                style += "; min-width: 220px"
+                            elif index == len(headings) - 1:
+                                style += "; min-width: 160px"
+                            else:
+                                style += "; min-width: 140px"
                             if objectives and index == 1 + len(project["parameters"]):
                                 style += "; border-left: 3px solid #546e7a"
                             v.Html(tag="th", children=[heading], style_=style)
@@ -160,21 +170,4 @@ def RunsView(state, services):
     )
     solara.FileDrop("Upload runs CSV", lazy=False, on_file=load_csv)
 
-    solara.Markdown("## Objective history")
-    if project["runs"]:
-        fig, ax = plt.subplots(figsize=(7, 3))
-        for objective in objectives:
-            name = objective["name"]
-            points = [(index, results_for(project, run)[name]) for index, run in enumerate(project["runs"], 1) if name in results_for(project, run)]
-            if points:
-                ax.plot([point[0] for point in points], [point[1] for point in points], marker="o", label=name)
-        ax.set_xlabel("Run order")
-        ax.set_ylabel("Objective")
-        if objectives and any(results_for(project, run) for run in project["runs"]):
-            ax.legend()
-        ax.grid(True, alpha=0.25)
-        fig.tight_layout()
-        solara.FigureMatplotlib(fig)
-        plt.close(fig)
-    else:
-        solara.Markdown("_Objective history appears after the first run._")
+    ObjectiveVisualization(project, services.plots)

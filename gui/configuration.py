@@ -42,7 +42,11 @@ def ParameterConfiguration(state, configuration):
         state["message"].value = f"{kind.capitalize()} deleted. Existing measurements are retained."
 
     def table(kind, headings, items, drafts):
-        with v.Html(tag="div", style_="overflow-x: auto"):
+        with v.Html(
+            tag="div",
+            style_="width: 100%; max-width: 100%; min-width: 0; overflow-x: auto",
+            attributes={"tabindex": "0", "role": "region", "aria-label": f"{kind.capitalize()} table"},
+        ):
             min_width = "1020px" if kind == "parameter" else "480px"
             with v.Html(tag="table", style_=f"width: 100%; min-width: {min_width}; table-layout: fixed; border-collapse: collapse"):
                 with v.Html(tag="thead"):

@@ -69,6 +69,8 @@ upload replaces the current project; an invalid upload leaves it unchanged.
 - Users can add a blank run row and enter its parameter values and objective
   directly in the table. Parameter values are also editable for existing runs
   and recommendations.
+- Categorical parameter cells use a dropdown of the configured choices. Retained
+  values that are no longer choices remain visible and require correction.
 - The Run and notes column is editable for every row. Row saves retain its
   text through draft conversion and project export and import.
 - Parameter and objective columns are visually separated, and editable value
@@ -140,9 +142,14 @@ The MVP provides:
   objective cells are editable, and adding a run creates a blank row in the
   table. The Runs and recommendations heading appears above the table; the
   Generate batch and Add run buttons appear below it.
-- A simple chart of each objective over run order.
+- Tables scroll horizontally when their columns do not fit the available width.
+- Best-so-far progress for each objective after each saved run, respecting
+  maximize/minimize direction and carrying the best across missing observations.
+- A scatter plot for every unordered objective pair in multiobjective projects,
+  using only runs with both results observed. Label axes with objective names
+  and directions; exclude predictions and unobserved recommendations.
 - A project JSON download action and clear feedback for invalid input or errors.
-- Parameter-response plots, Pareto plots, and convergence indicators are deferred.
+- Parameter-response plots, Pareto-front overlays, and convergence indicators are deferred.
 
 ## 7. Persistence and portability
 

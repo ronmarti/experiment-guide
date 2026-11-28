@@ -125,6 +125,20 @@ class ConfigurationTests(unittest.TestCase):
         finally:
             context.close()
 
+    def test_configuration_tables_have_keyboard_accessible_horizontal_scroll(self):
+        root, context = solara.render(ParameterConfiguration(self.state, self.services.configuration), handle_error=False)
+        try:
+            regions = [w for w in widgets(root) if getattr(w, "attributes", {}).get("role") == "region"]
+            self.assertEqual({w.attributes["aria-label"] for w in regions}, {"Parameter table", "Objective table", "Constraint table"})
+            for region in regions:
+                self.assertIn("overflow-x: auto", region.style_)
+                self.assertIn("max-width: 100%", region.style_)
+                self.assertEqual(region.attributes["tabindex"], "0")
+                table = next(w for w in widgets(region) if getattr(w, "tag", None) == "table")
+                self.assertIn("min-width:", table.style_)
+        finally:
+            context.close()
+
     def test_partial_objectives_are_sent_to_ax_without_imputation(self):
         project = self.state["project"].value
         upgrade_project(project)

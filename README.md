@@ -26,6 +26,9 @@ add separate runs and do not automatically match recommendations, since paramete
 values may repeat.
 The best saved observed values are highlighted for each objective, including
 ties; unsaved edits and predictions are not ranked.
+Optimization progress plots show the best-so-far saved result for each objective
+at each run step. Multiobjective projects also show every objective pair as a
+scatter plot, using only runs with both results measured.
 Each row shows the model's predicted mean ± sigma for each objective
 alongside, but separately from, observed results. Sigma is the
 posterior standard deviation of the expected outcome, not measurement error.
