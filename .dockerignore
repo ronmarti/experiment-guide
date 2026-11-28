@@ -1,0 +1,7 @@
+tests/*
+.devcontainer/*
+.github/*
+.git
+.venv
+**/__pycache__
+**/*.pyc

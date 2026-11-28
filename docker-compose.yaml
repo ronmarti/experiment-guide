@@ -3,19 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: prod
+      target: prod-cpu
     image: experiment-guide
     restart: unless-stopped
     ports:
       - 8765:8765
-    volumes:
-      - data:/data
+    environment:
+      APP_ACCESS_KEY: ${APP_ACCESS_KEY:-123}
     networks:
       - experiment-guide-network
-
-volumes:
-  data:
-    driver: local
 
 networks:
   experiment-guide-network:

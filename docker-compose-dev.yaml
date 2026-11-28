@@ -10,6 +10,8 @@ services:
     #   - ./secrets/.env
     ports:
       - 8756:8756 
+    environment:
+      APP_ACCESS_KEY: ${APP_ACCESS_KEY:-change-me}
     volumes:
       - .:/experiment-guide:delegated
     networks:

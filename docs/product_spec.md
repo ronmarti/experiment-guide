@@ -1,299 +1,198 @@
-# Adaptive Experimentation SaaS - Product Specification
+# Adaptive Experimentation - MVP Product Specification
 
 ## 1. Product summary
 
-Build a public, domain-neutral SaaS for manual adaptive experimentation. Users
-describe an experiment search space and numeric objectives, enter run results,
-and request a batch of candidate parameterizations. The platform shows observed
-history and model predictions with uncertainty.
-
-The product is not an equipment-automation system in the first release. The
-system may be extended later through an API that lets external runners retrieve
-recommendations and submit results.
-
-## 2. Launch scope
-
-The public launch must include:
-
-- Google OAuth sign-in.
-- Invitation-only registration by default, with an admin-controlled open-registration setting.
-- Admin and user roles.
-- Project ownership, reusable teams, project sharing, and email invitations.
-- Continuous, integer, choice/categorical, boolean, and fixed parameters.
-  Conditional/dependent and derived parameters are deferred.
-- Linear numeric parameter constraints.
-- Log-scaled continuous/integer ranges.
-- One or more numeric scalar metrics with maximize or minimize direction.
-- Single-objective and multi-objective Pareto modes.
-- Weighted-scalar objective mode with nonnegative raw-value coefficients.
-- Automatic Ax strategy selection and an initial Sobol/space-filling phase.
-- CPU and GPU recommendation jobs.
-- Asynchronous jobs with status.
-- Audited experiment-row edits.
-- CSV import/export.
-- Metric history, parameter-response, and Pareto visualizations.
-- Project-scoped external-runner API tokens reserved for the future integration API.
-
-## 3. Roles and access
-
-### 3.1 Platform roles
-
-- **User**: owns projects and teams, joins teams, and interacts with shared projects.
-- **Admin**: manages users and projects, controls registration, GPU availability,
-  and per-user runtime, concurrency, and batch-size limits.
-
-The first platform admin is configured by deployment settings using the verified
-Google email address. Account deletion requires that every owned project first
-be transferred or deleted.
-
-### 3.2 Registration and invitations
-
-- Registration defaults to invitation-only.
-- Admins may switch to open Google registration.
-- Team owners invite users by exact email address.
-- There is no global user search or account directory.
-- A team invitation may be accepted after the invitee signs in with Google.
-- Only team owners manage team membership and sharing.
-
-### 3.3 Projects and teams
-
-- Projects are private by default.
-- Owners may create reusable teams and invite users to them.
-- A project may be shared with multiple teams.
-- Each team-project grant is view-only or edit.
-- The owner retains ownership and project administration.
-- If a user receives both view and edit grants, edit permission wins.
-- Shared users with edit access may edit experiment data/settings and generate
-  jobs. View users may view project data and results.
-
-## 4. Project model
-
-A project contains:
-
-- Search-space parameter definitions.
-- Parameter constraints.
-- Objective/metric definitions and directions.
-- Objective mode.
-- Experiment runs.
-- Recommendation batches.
-- Project sharing and API-token settings.
-- Audit history.
-
-### 4.1 Parameters
-
-Supported types:
-
-- Continuous float ranges with inclusive bounds.
-- Integer ranges with inclusive bounds.
-- Choice/categorical parameters.
-- Boolean choice parameters.
-- Fixed parameters.
-- Log scale for float and integer ranges.
-
-Numeric linear constraints are supported, for example
-`x1 + 2*x2 <= 10`. Conditional/dependent parameter choices are deferred.
-
-### 4.2 Metrics
-
-- Each metric is one numeric scalar per run.
-- Every metric has a maximize or minimize direction.
-- Missing metric values are allowed.
-- Missing values are never imputed.
-- Optional measurement standard error may be supplied per run and metric.
-- Partial observations contribute to objective-specific modeling where Ax
-  supports partial data.
-
-## 5. Optimization behavior
-
-### 5.1 Strategy selection
-
-The app uses Ax for strategy selection and candidate generation. Users do not
-choose an algorithm in the MVP.
-
-- Before enough observations exist, request an initial space-filling/Sobol batch.
-- Use Ax's automatic generation strategy after the initialization phase.
-- Existing externally supplied observations may count toward initialization.
-- For GPU jobs, select GPU for Ax/PyTorch/BoTorch model fitting and candidate
-  generation when available.
-- The CPU default must remain the lowest-cost option.
-
-CPU and GPU are independent execution resources, not a parameter of the Ax
-experiment state.
-
-### 5.2 Batch generation
-
-- The user requests a batch and chooses N.
-- The platform generates N together from one snapshot of current project data.
-- The batch remains fixed until results are entered or the batch is modified.
-- Fewer than N results may be entered.
-- Unrun recommendations in a returned batch are marked skipped.
-- The user explicitly requests the next batch after entering results.
-- External runs may be added in addition to generated recommendations.
-- An external run may link to a recommendation while retaining actual parameter
-  values different from the suggested values.
-
-### 5.3 Initial observations
-
-- A project may generate recommendations before it has any results.
-- The initial batch uses an Ax space-filling design.
-- Later batches adapt to observed data.
-
-### 5.4 Out-of-space observations
-
-- External runs may store parameter values outside the current search space.
-- Such runs remain visible as history.
-- They are excluded from optimization until a project parameter update brings
-  them inside the active search space.
-
-### 5.5 Objective modes
-
-**Single objective**
-
-- Use the configured maximize/minimize direction.
-
-**Pareto/multi-objective**
-
-- Generate candidate designs intended to represent or improve the Pareto frontier.
-- Show observed and predicted Pareto tradeoffs.
-
-**Weighted scalar**
-
-- Allow nonnegative user-specified weights.
-- Apply weights directly to raw metric values.
-- Convert maximize objectives to positive terms and minimize objectives to negative
-  terms, or otherwise define the score with a single unambiguous expression.
-- Do not normalize or rescale metrics automatically.
-- Users are responsible for scale choices.
-- The UI shows units/ranges and warns about potentially unbalanced scales.
-
-## 6. Uncertainty and predictions
-
-- Model-predicted outcomes show 95% posterior credible intervals by default.
-- Observed-run summaries show 95% statistical confidence intervals by default.
-- The UI labels these interval types separately rather than presenting them as
-  interchangeable.
-- Optional measurement standard errors are used as observation noise where Ax
-  supports that information.
-- If no standard error is supplied, the model infers observation noise from runs.
-
-## 7. Experiment data
-
-### 7.1 Runs
-
-One table row represents one completed or partial run:
-
-- Run ID.
-- Parameter values.
-- Metric values.
-- Optional metric standard errors.
-- Optional link to a recommendation batch item.
-- Origin: generated, external, or modified recommendation.
-- Status: planned, running, completed, skipped, or failed.
-- Audit metadata.
-
-Repeated parameterizations are stored as separate rows.
-
-### 7.2 Editing
-
-- Users with edit permission may modify parameter and metric values.
-- The platform keeps a change history with user, timestamp, old value, and new
-  value.
-- Compatible project-definition edits are allowed.
-- Incompatible edits also remain allowed; affected old batches become historical
-  and incompatible. Users may edit saved recommendation parameter values to restore
-  compatibility.
-- Editing a saved recommendation recalculates predictions and intervals for the
-  edited parameterization and marks the item user-modified.
-- Relevant project edits invalidate refreshable predictions and trigger
-  recalculation of saved batch predictions using current project data.
-
-**For an old batch:**
-
-1. Preserve the original candidate parameterizations.
-2. Refresh predictions and intervals against current data.
-3. Mark the batch recomputed after relevant edits.
-4. If a project-definition edit makes a candidate incompatible, preserve the
-   candidate, mark it historical/incompatible, and do not silently drop it.
-
-## 8. Visualizations
-
-The launch UI must provide:
-
-- Metric history over run order.
-- Parameter-versus-metric plots with model uncertainty.
-- Pareto plot for multi-objective projects.
-- Batch candidate table with predictions and interval bounds.
-- Convergence indicators derived from observed history/model behavior.
-- CSV export of project runs and recommendation batches.
-
-Convergence indicators are informational. The app never stops or suppresses
-experiments automatically.
-
-## 9. Async jobs and compute
-
-### 9.1 Job lifecycle
-
-Recommendation jobs are asynchronous:
-
-`queued -> starting -> running -> succeeded | failed | cancelled`
-
-The UI shows status and allows users to return later. Job failures include a
-user-visible reason without exposing credentials or infrastructure details.
-
-### 9.2 Compute
-
-- Solara/FastAPI hosts UI and API; it does not perform heavy optimization inline.
-- CPU jobs run in portable workers.
-- GPU jobs run in GPU-capable workers.
-- The AWS-first deployment uses Lambda-compatible CPU modules and a separate
-  GPU-capable compute path.
-- Lambda remains part of the CPU architecture; GPU execution is not assumed to
-  be available there.
-- A job must not silently change a GPU request to CPU.
-- If GPU is unavailable or over its limit, fall back to CPU and show a clear
-  notification.
-- Admin GPU disablement prevents GPU job dispatch.
-
-### 9.3 Limits
-
-Admins configure per-user limits for:
-
-- Maximum concurrent jobs.
-- Maximum job runtime.
-- Maximum batch size.
-- Maximum GPU availability.
-
-The UI shows a user's applicable limits and resource usage. There is no billing
-system in the launch release.
-
-## 10. Future external-runner API
-
-The external runner API is not required for public launch hardware integration,
-but the data model and authentication boundary must support it.
-
-- Project-scoped revocable API tokens.
-- Tokens have narrow permissions, such as fetch recommendations or submit runs.
-- Users may create and revoke project tokens.
-- External runners may fetch recommendation batches and submit actual runs.
-- Submitted actual runs may differ from saved recommendations and remain linkable.
-- Project edit permission rules do not bypass token-project scope.
-
-## 11. Persistence and reproducibility
-
-- Store project data, runs, audit changes, jobs, and saved batch configurations.
-- Reconstruct Ax state from project data when generating jobs.
-- A batch does not store an immutable Ax snapshot or model/package version.
-- Batch edits and refreshes use current project data.
-- The app stores enough configuration and data to generate future recommendations,
-  but this is not a versioned experiment ledger.
-
-## 12. Security and privacy
-
-- All project access checks occur server-side.
-- Project, team, token, and job operations use authorization checks at the API
-  boundary and in worker entry points.
-- API tokens are hashed at rest and shown only once.
-- Google OAuth accounts must have verified email addresses.
-- CSV uploads are size-limited, schema-validated, and parsed without code execution.
-- Deleting a project deletes its runs, recommendation batches, audit history,
-  API tokens, and job records, after owner confirmation.
+Build a domain-neutral web app for manual adaptive experimentation. A user
+defines a search space and one or more numeric objectives, imports or enters experiment
+results, and requests batches of candidate parameterizations. The user performs
+the experiments outside the app and records the results.
+
+The MVP is a stateless, ephemeral service demonstrated locally with Docker
+Desktop. A project is portable as a JSON file rather than stored by the
+service. Deployment to an AWS container service may follow, but AWS-specific
+architecture is not part of the MVP.
+
+## 2. MVP scope
+
+- Access using a deployment-configured API key supplied at startup.
+- Start a blank project or upload a previously exported project JSON file.
+- Define continuous, integer, and categorical parameters.
+- Define one or more numeric objectives, each to maximize or minimize.
+- Import experiment results from CSV, and add, edit, or delete results in the UI.
+- Generate user-requested batches using Ax: start with a space-filling design
+  and adapt subsequent recommendations to observed results.
+- View experiment runs and recommendations in one table, and view objective
+  history.
+- Download the complete project state as JSON.
+- Run on CPU in a standard application container.
+
+Accounts, teams, sharing, permissions, persistent server-side project storage,
+GPU execution, and AWS-specific services are outside the MVP.
+
+## 3. Access and session
+
+- The deployment supplies an application access key through configuration.
+- The user enters the key on the startup screen; the server validates it before
+  allowing project operations.
+- Authorization applies to the current session. There are no user accounts,
+  registration, roles, project ownership, or per-user limits.
+- Separate sessions must not expose each other's in-memory project state.
+- The key is not included in exported project files or logs, and invalid keys
+  are rejected without revealing the configured key.
+- Use HTTPS when the app is exposed beyond a trusted local environment.
+
+## 4. Project and data
+
+A project contains its parameter definitions, objective definitions, experiment
+runs, and generated recommendation batches. The app holds the active project
+only for the current session; the service is not a durable project store.
+The project JSON upload remains available under Configuration while a project is open. A valid
+upload replaces the current project; an invalid upload leaves it unchanged.
+
+### 4.1 Parameters and objective
+
+- Continuous parameters have inclusive numeric bounds.
+- Integer parameters have inclusive integer bounds.
+- linear constraints are part of MVP.
+- Categorical parameters have a defined set of choices.
+- Each numeric objective has a maximize or minimize direction. Multiple
+  objectives are optimized simultaneously.
+- Boolean and fixed parameters, log-scaled ranges,
+  conditional parameters, and derived parameters are deferred.
+
+### 4.2 Runs
+
+- A run records parameter values and any available numeric objective results.
+- Generated recommendations appear in the same table as runs, with a blank
+  objective cells until the user enters observed results. Entering a valid
+  result turns that recommendation into an observed run.
+- Users can add a blank run row and enter its parameter values and objective
+  directly in the table. Parameter values are also editable for existing runs
+  and recommendations.
+- Categorical parameter cells use a dropdown of the configured choices. Retained
+  values that are no longer choices remain visible and require correction.
+- The Run and notes column is editable for every row. Row saves retain its
+  text through draft conversion and project export and import.
+- Parameter and objective columns are visually separated, and editable value
+  fields are labeled with their parameter or objective name.
+- New runs, imported runs, and recommendations are appended in insertion
+  order. Saving a blank run keeps its position; project export and import
+  preserve the table order.
+- Saving a row validates its entered values. A row without any objective
+  result is not an observation. Available results are retained even when other
+  objective results are missing.
+- Highlight the best saved observed value for each objective in the shared
+  table, using its maximize or minimize direction. Highlight all ties; do not
+  rank predictions or unsaved edits.
+- Users can import runs from CSV and add, edit, or delete runs in the UI.
+- Users can delete any recommendation, whether or not it has results; deleting
+  a filled recommendation also deletes its linked run.
+- Repeated parameterizations are allowed as separate runs.
+- The app validates parameter names, values, and the objective against the
+  current project definition. Invalid input is reported to the user rather than
+  silently accepted or discarded.
+- Measurement standard errors, run statuses, and audit history are deferred.
+
+### 4.3 CSV import
+
+- CSV represents experiment results; it is not the project persistence format.
+- The import identifies columns for each project parameter and objective.
+  Objective cells may be blank, but each row needs at least one result.
+- The app reports schema and row validation errors so the user can correct the
+  file. An invalid import must not partially change the project.
+- Uploads are size-limited and parsed as data, without executing file contents.
+- CSV export is deferred; the project JSON is the MVP export.
+
+## 5. Recommendations
+
+- The user chooses a batch size and explicitly requests recommendations.
+- Ax selects the generation strategy; the user does not select an algorithm.
+- Before sufficient observations exist, Ax generates a space-filling initial
+  batch. Valid imported or manually entered observations can contribute to
+  subsequent adaptive generation. Ax receives all available objective results
+  without imputing missing results. An observed row with missing or invalid
+  parameter values must be corrected before generation.
+- The app displays and retains generated parameterizations in the project.
+  Users perform the experiments externally and fill in their observed results
+  in the shared table, or import results from CSV.
+- Show each objective's predicted mean and sigma together as mean ± sigma
+  (sigma is the posterior standard deviation of the expected outcome),
+  separately from observed results. Recalculate a
+  preview when recommendation parameters are edited, using saved observations.
+  Saving any row, including a manual run or draft, refreshes and persists its predictions using the newly saved
+  observations. An invalid or incomplete parameterization, missing observations,
+  or an unmodeled objective has no prediction. Report model failures without
+  discarding successfully saved row data.
+- Failures are shown to the user without exposing credentials or infrastructure
+  details. The app must not present a failed generation as a successful batch.
+- Weighted-scalar optimization and uncertainty intervals are deferred.
+
+## 6. UI
+
+The MVP provides:
+
+- A consistent Adaptive Experimentation page heading and a footer crediting
+  Martin Ron with a link to the project repository. The project name is editable
+  under Configuration.
+- A startup screen for the access key and a choice to create or load a project.
+- The app description and getting-started guidance appear on the authorization
+  screen and under Configuration, not on the runs screen.
+- Access key must be treated as a secure password that has to stay safe.
+- Separate editable tables for parameters, objectives, and linear constraints.
+  Each configuration row has save and delete actions; adding a parameter
+  creates a blank table row. Numeric parameters use lower and upper bound
+  columns, while categorical parameters use choices.
+- Project configuration and run entry/import screens.
+- A single table containing runs and generated recommendations. Parameter and
+  objective cells are editable, and adding a run creates a blank row in the
+  table. The Runs and recommendations heading appears above the table; the
+  Generate batch and Add run buttons appear below it.
+- Tables scroll horizontally when their columns do not fit the available width.
+- One common plot of best-so-far progress for all objectives after each saved run, respecting
+  maximize/minimize direction and carrying the best across missing observations.
+- A scatter plot for every unordered objective pair in multiobjective projects,
+  using only runs with both results observed. Label axes with objective names
+  and directions; exclude predictions and unobserved recommendations.
+  Highlight the preferred corner and point toward improvement for both objectives,
+  respecting their directions. This is a direction cue, not a target threshold
+  or a guarantee of feasibility.
+  Overlay the pairwise Pareto frontier of jointly observed results. Deduplicate
+  coincident frontier points, respect both directions, and distinguish the
+  frontier from other observations. Connecting segments are visual guides,
+  not guaranteed attainable outcomes or the full multiobjective frontier.
+- A project JSON download action and clear feedback for invalid input or errors.
+- Parameter-response plots and convergence indicators are deferred.
+- Charts use interactive Plotly rendering with hover values and run notes,
+  zoom, pan, reset, and image export. JavaScript is bundled locally rather than
+  loaded from a CDN.
+- Point tooltips include the visible Run and notes value and full parameter set,
+  including linked recommendation notes. Best-so-far points identify the run
+  that achieved the value, not the later run that carries it forward.
+
+## 7. Persistence and portability
+
+- The user explicitly downloads a JSON file containing the complete project
+  state, including definitions, runs, recommendation batches, and saved draft
+  rows.
+- Changes to definitions preserve existing measurements. Incompatible
+  parameter values must be corrected before they can be used for generation.
+  Existing single-objective project files remain loadable.
+- Uploading a valid exported JSON file restores that state for continued work.
+  Project files do not contain the access key or session credentials.
+- The file format includes a schema version. Invalid or unsupported files are
+  rejected with a clear error without replacing the active project.
+- There is no server-side durable storage or automatic save. Closing a session,
+  restarting the container, or losing session state can discard changes since
+  the last download; the UI makes this risk clear.
+- Ax state is reconstructed from the project data when generating candidates;
+  the MVP does not promise immutable model snapshots or versioned reproducibility.
+
+## 8. Execution and deployment
+
+- The application and CPU-based optimization run in a standard Docker container,
+  suitable for demonstration on localhost with Docker Desktop - prepare production Docker stage.
+- Recommendation generation may take time; the UI communicates progress or
+  waiting and reports failures.
+- Separate workers, durable job queues, returning later to jobs, GPU execution,
+  and AWS-specific deployment research or infrastructure are deferred.
+- An external-runner API and project-scoped API tokens are deferred.

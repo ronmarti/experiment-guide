@@ -1,2 +1,81 @@
-# experiment-guide
+# Adaptive Experimentation Guide
+
 App for adaptive experimentation. It stores, visualizes results and propose next experiments based on the given data.
+
+Imagine e.g. you want to bake a better bread and you want to systematically explore different ingredient combinations and baking conditions to find the optimal recipe. After each baking attempt, you assign a score to the taste and structure of the bread. The app helps you keep track of these experiments and guides you towards the best combination of ingredients and conditions.
+
+## Try it out
+The app is available at 
+[experiment-guide-526e4.containers.snapdeploy.app](https://experiment-guide-526e4.containers.snapdeploy.app), it takes a minute to spin up.
+
+For now, I leave the **authorization key "123"**.
+
+## Start a project
+
+Set `APP_ACCESS_KEY` and run `docker compose up --build`, then open
+http://localhost:8765. Enter the key and select **Authorize**. After login,
+create a blank project or upload an exported project JSON file.
+
+The `prod-cpu` target in `.devcontainer/Dockerfile` builds the application
+virtual environment in `prod-cpu-build` and copies it at the same path into a
+fresh Python slim runtime. Poetry and its build-stage dependencies stay out of
+the production image. Dependencies still come from the existing Poetry lock.
+
+Projects are kept only in the current session. Download the project JSON
+before closing the session or restarting the container to retain your changes.
+You can upload another project JSON under **Configuration** to replace the active project;
+download your current project first if you want to keep it.
+
+On **Runs and recommendations**, generate a batch or select **Add run** to
+create a blank row. Edit parameter values and results directly in the table,
+then select **Save** for each row before leaving the screen or downloading.
+New runs and recommendations appear at the end of the table and keep their
+order when saved or reloaded.
+You can save rows with missing objective results. Ax uses available results
+without imputing the missing ones. Observed rows must have valid values for
+all current parameters before generating another batch. **Delete** removes a
+row; for a recommendation, it also removes the linked run, if any. CSV imports
+add separate runs and do not automatically match recommendations, since parameter
+values may repeat.
+The best saved observed values are highlighted for each objective, including
+ties; unsaved edits and predictions are not ranked.
+One shared optimization progress plot shows the best-so-far saved result for
+each objective at each run step, in its original units. Tooltips show the visible
+Run and notes text and full parameter set; best-so-far points describe the run
+that achieved that value. Multiobjective projects also show every objective pair as a
+scatter plot, using only runs with both results measured. A red dashed line
+connects the pairwise Pareto frontier; connecting segments are visual guides,
+not guaranteed attainable outcomes.
+Charts use Plotly with hover details, zoom/pan controls, and image export.
+The Plotly JavaScript bundle is embedded locally; no CDN is required.
+Each row shows the model's predicted mean ± sigma for each objective
+alongside, but separately from, observed results. Sigma is the
+posterior standard deviation of the expected outcome, not measurement error.
+Predictions update as you edit recommendation parameters, using saved
+observations. Saving any row refreshes and stores its predictions,
+including any result just saved. Prediction previews are not saved until the
+row is saved. Predictions are unavailable without observations, for incomplete
+or invalid parameter values, and for objectives without data.
+Wait for the update to finish before downloading. If interrupted, a saved
+refresh resumes when the runs tab is reopened. Other existing predictions
+remain snapshots until their rows are refreshed.
+
+On **Configuration**, add or edit parameters, objectives, and linear
+constraints in their respective tables. Save each row before leaving the
+screen. Multiple objectives are optimized simultaneously; existing measurements
+are retained when definitions change.
+
+## Source layout and tests
+
+The Solara entry point is `gui/app.py`; components and session state live in
+`gui/`. Project data helpers are in `experiment/model/`, while validation,
+configuration, persistence, runs, and Ax integration are in
+`experiment/services/`. `gui/services.py` wires the services and their
+dependencies for each session; tests can inject an optimizer or Ax client
+factory. Project JSON remains compatible with existing schema versions.
+
+Run the unit and UI component tests with:
+
+```sh
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 poetry run python -m unittest discover -s tests -v
+```
